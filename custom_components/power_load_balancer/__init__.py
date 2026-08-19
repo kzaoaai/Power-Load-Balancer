@@ -92,6 +92,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         logger.debug("Setting up platforms", platforms=PLATFORMS)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+        power_balancer.async_start_listening()
+
         await _async_register_services(hass, entry)
 
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))

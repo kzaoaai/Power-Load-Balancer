@@ -91,7 +91,12 @@
         "data": {
           "main_power_sensor": "Main Power Sensor",
           "power_budget_watt": "Power Budget (Watt)",
-          "cooldown_seconds": "Cooldown Time (seconds)"
+          "cooldown_seconds": "Cooldown Time (seconds)",
+          "sustained_shedding_enabled": "Enable sustained-load shedding",
+          "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
+          "sustained_duration_seconds": "Sustained-load duration before shedding (seconds)",
+          "notify_persistent": "Persistent notification on balancer events",
+          "notify_service": "Notify service for balancer events (e.g. a mobile app)"
         },
         "description": "Configure the main power sensor, power budget, and the default cooldown time before appliances can turn back on after being turned off.",
         "title": "Edit Main Sensor Settings",
@@ -135,6 +140,9 @@
           "invalid_sensor_index": "Invalid sensor selected for editing."
         }
       }
+    },
+    "error": {
+      "valid_budget_required": "Please enter a valid power budget (a positive integer)."
     }
   },
   "options": {
@@ -201,11 +209,22 @@
         "data": {
           "main_power_sensor": "Main Power Sensor",
           "power_budget_watt": "Power Budget (Watt)",
-          "cooldown_seconds": "Cooldown Time (seconds)"
+          "cooldown_seconds": "Cooldown Time (seconds)",
+          "sustained_shedding_enabled": "Enable sustained-load shedding",
+          "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
+          "sustained_duration_seconds": "Sustained-load duration before shedding (seconds)",
+          "notify_persistent": "Persistent notification on balancer events",
+          "notify_service": "Notify service for balancer events (e.g. a mobile app)"
         },
         "description": "Edit the main power sensor, power budget, and cooldown settings.",
-        "title": "Edit Main Sensor Settings"
+        "title": "Edit Main Sensor Settings",
+        "errors": {
+          "valid_budget_required": "Please enter a valid power budget (a positive integer)."
+        }
       }
+    },
+    "error": {
+      "valid_budget_required": "Please enter a valid power budget (a positive integer)."
     }
   }
 }

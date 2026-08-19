@@ -341,6 +341,16 @@ class ApplianceController:
                 current_mode=current_mode,
             )
 
+        operation_list = appliance_state.attributes.get("operation_list")
+        if isinstance(operation_list, list) and "off" not in operation_list:
+            logger.debug(
+                "Water heater does not support the 'off' operation mode, "
+                "falling back to turn_off",
+                entity_id=entity_id,
+                operation_list=operation_list,
+            )
+            return ("turn_off", {"entity_id": entity_id})
+
         logger.debug(
             "Turning off water_heater entity",
             entity_id=entity_id,
@@ -590,7 +600,7 @@ class ApplianceController:
         entity_id: str,
         expected_power: float,
         get_total_power_callback: Any,
-        power_budget: int,
+        get_power_budget_callback: Any,
     ) -> None:
         """
         Schedule an automatic turn-on of an appliance after the configured delay.
@@ -599,7 +609,9 @@ class ApplianceController:
             entity_id: Entity ID of the appliance.
             expected_power: Expected power consumption in watts.
             get_total_power_callback: Callback to get current total power.
-            power_budget: Maximum power budget in watts.
+            get_power_budget_callback: Callback returning the effective budget
+                in watts, read at restore time so budget changes made during
+                the cooldown are honored.
 
         """
         logger = ContextLogger(_LOGGER, "auto_turn_on").new_operation("schedule")
@@ -648,7 +660,7 @@ class ApplianceController:
                         return
 
                     current_power = get_total_power_callback()
-                    available_budget = power_budget - current_power
+                    available_budget = get_power_budget_callback() - current_power
 
                     expected_power_value = self._expected_power_restoration.get(
                         entity_to_restore, 0.0
@@ -735,6 +747,26 @@ class ApplianceController:
         )
         return ("turn_off", {"entity_id": entity_id})
 
+    def _keep_balanced_off_after_failure(
+        self, entity_id: str, logger: ContextLogger
+    ) -> bool:
+        """
+        Decide whether a failed turn-off should keep its balanced-off mark.
+
+        A service call can fail (typically on timeout) after the device has
+        already switched off. In that case the balanced-off tracking must be
+        kept so the appliance is still restored later.
+        """
+        state_after = self.hass.states.get(entity_id)
+        if state_after is not None and state_after.state == "off":
+            logger.warning(
+                "Turn-off service call failed but the appliance is off; "
+                "keeping balanced-off tracking",
+                entity_id=entity_id,
+            )
+            return True
+        return False
+
     @retry_with_backoff(max_retries=2, backoff_factor=0.5, retry_on=(RetryableError,))
     async def turn_off_appliance(self, entity_id: str, reason: str = "") -> None:
         """
@@ -775,9 +807,13 @@ class ApplianceController:
                 logger=logger,
             )
 
-            await safe_service_call(params)
-
             self.mark_appliance_balanced_off(entity_id, reason)
+            try:
+                await safe_service_call(params)
+            except Exception:
+                if not self._keep_balanced_off_after_failure(entity_id, logger):
+                    self.remove_from_balanced_off(entity_id)
+                    raise
 
             logger.info(
                 "Successfully turned off appliance", entity_id=entity_id, reason=reason

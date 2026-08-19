@@ -36,10 +36,10 @@ class PowerBudgetNumber(NumberEntity):
     """Number entity to adjust the power budget at runtime."""
 
     _attr_has_entity_name = True
-    _attr_name = "Power Budget"
+    _attr_translation_key = "power_budget"
     _attr_icon = "mdi:flash"
     _attr_native_unit_of_measurement = "W"
-    _attr_native_min_value = 0
+    _attr_native_min_value = 1
     _attr_native_max_value = 20000
     _attr_native_step = 1
     _attr_mode = NumberMode.BOX
@@ -70,6 +70,16 @@ class PowerBudgetNumber(NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Set the power budget value."""
         new_budget = int(value)
+        if new_budget < 1:
+            _LOGGER.warning(
+                "Ignoring invalid power budget %s W (must be at least 1 W)",
+                new_budget,
+            )
+            self.async_write_ha_state()
+            return
+        if new_budget == self._balancer.power_budget:
+            self.async_write_ha_state()
+            return
         self._balancer.set_power_budget(new_budget)
 
         # Set skip_reload so the update listener doesn't trigger a full reload

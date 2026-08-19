@@ -25,6 +25,10 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
 )
@@ -36,9 +40,19 @@ from .const import (
     CONF_IMPORTANCE,
     CONF_LAST_RESORT,
     CONF_MAIN_POWER_SENSOR,
+    CONF_NOTIFY_PERSISTENT,
+    CONF_NOTIFY_SERVICE,
     CONF_POWER_BUDGET_WATT,
     CONF_POWER_SENSORS,
+    CONF_SUSTAINED_DURATION_SECONDS,
+    CONF_SUSTAINED_ENABLED,
+    CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_NOTIFY_PERSISTENT,
+    DEFAULT_NOTIFY_SERVICE,
+    DEFAULT_SUSTAINED_DURATION_SECONDS,
+    DEFAULT_SUSTAINED_ENABLED,
+    DEFAULT_SUSTAINED_THRESHOLD_PERCENT,
     DOMAIN,
     SUPPORTED_APPLIANCE_DOMAINS,
 )
@@ -66,7 +80,128 @@ DEFAULT_IMPORTANCE = 5
 
 def _get_power_sensor_selector() -> EntitySelector:
     """Return the entity selector for power sensors."""
-    return EntitySelector(EntitySelectorConfig(domain="sensor", device_class="power"))
+    return EntitySelector(
+        EntitySelectorConfig(domain="sensor", device_class=["power", "apparent_power"])
+    )
+
+
+def _sustained_schema_fields(config_data: dict[str, Any]) -> dict[Any, Any]:
+    """Return the schema fields for the sustained-load shedding options."""
+    return {
+        vol.Required(
+            CONF_SUSTAINED_ENABLED,
+            default=bool(
+                config_data.get(CONF_SUSTAINED_ENABLED, DEFAULT_SUSTAINED_ENABLED)
+            ),
+        ): bool,
+        vol.Required(
+            CONF_SUSTAINED_THRESHOLD_PERCENT,
+            default=config_data.get(
+                CONF_SUSTAINED_THRESHOLD_PERCENT,
+                DEFAULT_SUSTAINED_THRESHOLD_PERCENT,
+            ),
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=30,
+                max=100,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="%",
+            )
+        ),
+        vol.Required(
+            CONF_SUSTAINED_DURATION_SECONDS,
+            default=config_data.get(
+                CONF_SUSTAINED_DURATION_SECONDS,
+                DEFAULT_SUSTAINED_DURATION_SECONDS,
+            ),
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=10,
+                max=3600,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="s",
+            )
+        ),
+    }
+
+
+NOTIFY_SERVICE_DISABLED = "none"
+
+
+def _notify_schema_fields(
+    hass: HomeAssistant, config_data: dict[str, Any]
+) -> dict[Any, Any]:
+    """Return the schema fields for the balancer-event notification options."""
+    notify_services = sorted(hass.services.async_services().get("notify", {}))
+    current = str(config_data.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE))
+    options = [SelectOptionDict(value=NOTIFY_SERVICE_DISABLED, label="Disabled")]
+    options.extend(
+        SelectOptionDict(value=service, label=f"notify.{service}")
+        for service in notify_services
+    )
+    if current and current not in notify_services:
+        options.append(
+            SelectOptionDict(
+                value=current, label=f"notify.{current} (not currently loaded)"
+            )
+        )
+    return {
+        vol.Required(
+            CONF_NOTIFY_PERSISTENT,
+            default=bool(
+                config_data.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT)
+            ),
+        ): bool,
+        vol.Required(
+            CONF_NOTIFY_SERVICE, default=current or NOTIFY_SERVICE_DISABLED
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=options,
+                mode=SelectSelectorMode.DROPDOWN,
+                custom_value=True,
+            )
+        ),
+    }
+
+
+def _store_notify_options(
+    config_data: dict[str, Any], user_input: dict[str, Any]
+) -> None:
+    """Store validated notification options into config data."""
+    config_data[CONF_NOTIFY_PERSISTENT] = bool(
+        user_input.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT)
+    )
+    service = user_input.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
+    if isinstance(service, str):
+        service = service.strip().removeprefix("notify.")
+    else:
+        service = DEFAULT_NOTIFY_SERVICE
+    if service == NOTIFY_SERVICE_DISABLED:
+        service = DEFAULT_NOTIFY_SERVICE
+    config_data[CONF_NOTIFY_SERVICE] = service
+
+
+def _store_sustained_options(
+    config_data: dict[str, Any], user_input: dict[str, Any]
+) -> None:
+    """Store validated sustained-load shedding options into config data."""
+    config_data[CONF_SUSTAINED_ENABLED] = bool(
+        user_input.get(CONF_SUSTAINED_ENABLED, DEFAULT_SUSTAINED_ENABLED)
+    )
+    threshold = user_input.get(CONF_SUSTAINED_THRESHOLD_PERCENT)
+    config_data[CONF_SUSTAINED_THRESHOLD_PERCENT] = (
+        int(threshold)
+        if isinstance(threshold, (int, float))
+        else DEFAULT_SUSTAINED_THRESHOLD_PERCENT
+    )
+    duration = user_input.get(CONF_SUSTAINED_DURATION_SECONDS)
+    config_data[CONF_SUSTAINED_DURATION_SECONDS] = (
+        int(duration)
+        if isinstance(duration, (int, float))
+        else DEFAULT_SUSTAINED_DURATION_SECONDS
+    )
 
 
 def _get_appliance_selector() -> EntitySelector:
@@ -414,6 +549,8 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
                     self._config_data[CONF_COOLDOWN_SECONDS] = int(cooldown)
                 else:
                     self._config_data[CONF_COOLDOWN_SECONDS] = DEFAULT_COOLDOWN_SECONDS
+                _store_sustained_options(self._config_data, user_input)
+                _store_notify_options(self._config_data, user_input)
                 return await self.async_step_user()
 
         schema_dict: dict[Any, Any] = {}
@@ -450,6 +587,8 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             )
         )
+        schema_dict.update(_sustained_schema_fields(self._config_data))
+        schema_dict.update(_notify_schema_fields(self.hass, self._config_data))
 
         return self.async_show_form(
             step_id="edit_main_sensor",
@@ -807,48 +946,61 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             "Opening options flow step: async_step_edit_main_sensor, user_input=%s",
             user_input,
         )
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            self._config_data[CONF_MAIN_POWER_SENSOR] = user_input[
-                CONF_MAIN_POWER_SENSOR
-            ]
-            self._config_data[CONF_POWER_BUDGET_WATT] = user_input[
-                CONF_POWER_BUDGET_WATT
-            ]
-            cooldown = user_input.get(CONF_COOLDOWN_SECONDS)
-            if isinstance(cooldown, (int, float)):
-                self._config_data[CONF_COOLDOWN_SECONDS] = int(cooldown)
-            else:
-                self._config_data[CONF_COOLDOWN_SECONDS] = DEFAULT_COOLDOWN_SECONDS
-            return await self.async_step_sensor_menu()
+            power_budget = user_input.get(CONF_POWER_BUDGET_WATT)
+            if (
+                power_budget is None
+                or not isinstance(power_budget, int)
+                or power_budget <= 0
+            ):
+                errors[CONF_POWER_BUDGET_WATT] = "valid_budget_required"
+            if not errors:
+                self._config_data[CONF_MAIN_POWER_SENSOR] = user_input[
+                    CONF_MAIN_POWER_SENSOR
+                ]
+                self._config_data[CONF_POWER_BUDGET_WATT] = power_budget
+                cooldown = user_input.get(CONF_COOLDOWN_SECONDS)
+                if isinstance(cooldown, (int, float)):
+                    self._config_data[CONF_COOLDOWN_SECONDS] = int(cooldown)
+                else:
+                    self._config_data[CONF_COOLDOWN_SECONDS] = DEFAULT_COOLDOWN_SECONDS
+                _store_sustained_options(self._config_data, user_input)
+                _store_notify_options(self._config_data, user_input)
+                return await self.async_step_sensor_menu()
 
         current_cooldown = self._config_data.get(
             CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS
         )
 
+        schema_dict: dict[Any, Any] = {
+            vol.Required(
+                CONF_MAIN_POWER_SENSOR,
+                default=self._config_data.get(CONF_MAIN_POWER_SENSOR),
+            ): _get_power_sensor_selector(),
+            vol.Required(
+                CONF_POWER_BUDGET_WATT,
+                default=self._config_data.get(CONF_POWER_BUDGET_WATT),
+            ): int,
+            vol.Required(
+                CONF_COOLDOWN_SECONDS,
+                default=current_cooldown,
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=1,
+                    max=3600,
+                    step=1,
+                    mode=NumberSelectorMode.BOX,
+                    unit_of_measurement="s",
+                )
+            ),
+        }
+        schema_dict.update(_sustained_schema_fields(self._config_data))
+        schema_dict.update(_notify_schema_fields(self.hass, self._config_data))
+
         return self.async_show_form(
             step_id="edit_main_sensor",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_MAIN_POWER_SENSOR,
-                        default=self._config_data.get(CONF_MAIN_POWER_SENSOR),
-                    ): _get_power_sensor_selector(),
-                    vol.Required(
-                        CONF_POWER_BUDGET_WATT,
-                        default=self._config_data.get(CONF_POWER_BUDGET_WATT),
-                    ): int,
-                    vol.Required(
-                        CONF_COOLDOWN_SECONDS,
-                        default=current_cooldown,
-                    ): NumberSelector(
-                        NumberSelectorConfig(
-                            min=1,
-                            max=3600,
-                            step=1,
-                            mode=NumberSelectorMode.BOX,
-                            unit_of_measurement="s",
-                        )
-                    ),
-                }
-            ),
+            data_schema=vol.Schema(schema_dict),
+            errors=errors,
         )

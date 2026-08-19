@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt
 
 from .const import DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 MAX_LOG_SIZE = 50
+MAX_LOG_ENTRY_LENGTH = 300
 
 
 async def async_setup_entry(
@@ -46,12 +48,14 @@ async def async_setup_entry(
     async_add_entities([sensor])
 
 
-class PowerBalancerLogSensor(SensorEntity):
+class PowerBalancerLogSensor(SensorEntity, RestoreEntity):
     """
     Sensor entity that tracks power balancing events.
 
     This sensor provides a log of all power balancing actions taken,
     including appliances turned on/off and the reasons for those actions.
+    The last state and event history are restored across Home Assistant
+    restarts so an incident is still diagnosable after a reboot.
     """
 
     _balancer: PowerLoadBalancer
@@ -75,8 +79,25 @@ class PowerBalancerLogSensor(SensorEntity):
         self._attr_extra_state_attributes = {"events": []}
 
     async def async_added_to_hass(self) -> None:
-        """Register this sensor with the PowerLoadBalancer when added to hass."""
+        """Restore prior state and register with the PowerLoadBalancer."""
         await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
+            self._attr_native_value = last_state.state
+            restored_events = last_state.attributes.get("events")
+            if isinstance(restored_events, list):
+                self._attr_extra_state_attributes["events"] = [
+                    str(event) for event in restored_events
+                ][-MAX_LOG_SIZE:]
+            _LOGGER.debug(
+                "Restored %s event log entries from previous session",
+                len(self._attr_extra_state_attributes["events"]),
+            )
+
         self._balancer.register_event_log_sensor(self)
 
     @property
@@ -101,7 +122,7 @@ class PowerBalancerLogSensor(SensorEntity):
 
         """
         timestamp = dt.utcnow().isoformat(timespec="seconds")
-        log_entry = f"{timestamp} - {message}"
+        log_entry = f"{timestamp} - {message}"[:MAX_LOG_ENTRY_LENGTH]
         self._attr_extra_state_attributes["events"].append(log_entry)
 
         if len(self._attr_extra_state_attributes["events"]) > MAX_LOG_SIZE:

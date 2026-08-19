@@ -91,7 +91,12 @@
         "data": {
           "main_power_sensor": "Sensore di potenza principale",
           "power_budget_watt": "Budget di potenza (Watt)",
-          "cooldown_seconds": "Tempo di attesa (secondi)"
+          "cooldown_seconds": "Tempo di attesa (secondi)",
+          "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
+          "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
+          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)",
+          "notify_persistent": "Notifica persistente per gli eventi del bilanciatore",
+          "notify_service": "Servizio di notifica per gli eventi del bilanciatore (es. app mobile)"
         },
         "description": "Configura il sensore di potenza principale, il budget di potenza e il tempo di attesa predefinito prima che i dispositivi possano essere riaccesi dopo lo spegnimento.",
         "title": "Modifica impostazioni sensore principale",
@@ -135,6 +140,9 @@
           "invalid_sensor_index": "Sensore non valido selezionato per la modifica."
         }
       }
+    },
+    "error": {
+      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
     }
   },
   "options": {
@@ -201,11 +209,22 @@
         "data": {
           "main_power_sensor": "Sensore di potenza principale",
           "power_budget_watt": "Budget di potenza (Watt)",
-          "cooldown_seconds": "Tempo di attesa (secondi)"
+          "cooldown_seconds": "Tempo di attesa (secondi)",
+          "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
+          "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
+          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)",
+          "notify_persistent": "Notifica persistente per gli eventi del bilanciatore",
+          "notify_service": "Servizio di notifica per gli eventi del bilanciatore (es. app mobile)"
         },
         "description": "Modifica il sensore di potenza principale, il budget di potenza e le impostazioni di attesa.",
-        "title": "Modifica impostazioni sensore principale"
+        "title": "Modifica impostazioni sensore principale",
+        "errors": {
+          "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
+        }
       }
+    },
+    "error": {
+      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
     }
   }
 }

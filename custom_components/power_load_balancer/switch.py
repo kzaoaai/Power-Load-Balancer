@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN
 
@@ -32,17 +33,25 @@ async def async_setup_entry(
     async_add_entities([PowerLoadBalancerEnabledSwitch(power_balancer)])
 
 
-class PowerLoadBalancerEnabledSwitch(SwitchEntity):
+class PowerLoadBalancerEnabledSwitch(SwitchEntity, RestoreEntity):
     """Switch entity to enable/disable Power Load Balancer."""
 
     _attr_has_entity_name = True
-    _attr_name = "Enabled"
+    _attr_translation_key = "enabled"
     _attr_icon = "mdi:power"
 
     def __init__(self, balancer: PowerLoadBalancer) -> None:
         """Initialize the switch."""
         self._balancer = balancer
         self._attr_unique_id = f"{self._balancer.entry.entry_id}_enabled"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the previous enabled state across restarts."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state == "off":
+            self._balancer.set_enabled(False)
+            self.async_write_ha_state()
 
     @property
     def device_info(self) -> DeviceInfo | None:

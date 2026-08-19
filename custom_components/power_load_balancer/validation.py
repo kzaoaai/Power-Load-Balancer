@@ -122,24 +122,34 @@ def convert_power_to_watts(power: float, state: State) -> float:
     """
     Convert power value to watts based on unit of measurement.
 
+    Apparent power units (VA, kVA) are accepted and scaled numerically the
+    same way as their active power counterparts. The balancer is agnostic to
+    the physical distinction: budgets are interpreted in the same unit family
+    as the main power sensor, so a VA main sensor simply means VA budgets.
+
     Args:
         power: The power value to convert.
         state: The entity state containing unit_of_measurement attribute.
 
     Returns:
-        Power value in watts.
+        Power value in watts (or volt-amperes for apparent power sensors).
 
     """
-    unit = state.attributes.get("unit_of_measurement", "W").lower()
+    unit_raw = state.attributes.get("unit_of_measurement", "W")
+    if unit_raw in ("mW", "mVA"):
+        return power / 1000
 
-    if unit in ["kw", "kilowatt", "kilowatts"]:
-        return power * 1000
-    if unit in ["mw", "megawatt", "megawatts"]:
-        return power * 1000000
-    if unit in ["gw", "gigawatt", "gigawatts"]:
-        return power * 1000000000
-    if unit in ["w", "watt", "watts"]:
-        return power
+    factors = {
+        0.001: ("milliwatt", "milliwatts", "millivolt-ampere"),
+        1: ("w", "watt", "watts", "va", "volt-ampere", "voltampere"),
+        1000: ("kw", "kilowatt", "kilowatts", "kva", "kilovolt-ampere"),
+        1000000: ("mw", "megawatt", "megawatts"),
+        1000000000: ("gw", "gigawatt", "gigawatts"),
+    }
+    unit = unit_raw.lower()
+    for factor, units in factors.items():
+        if unit in units:
+            return power * factor
     _LOGGER.warning(
         "Unknown power unit '%s' for entity %s, assuming watts",
         unit,

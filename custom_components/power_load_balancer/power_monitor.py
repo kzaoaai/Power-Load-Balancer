@@ -52,12 +52,24 @@ class PowerMonitor:
         self._main_power_sensor_entity_id = main_power_sensor_entity_id
         self._monitored_sensors = monitored_sensors
         self._power_budget = power_budget
+        self._effective_budget: float = float(power_budget)
         self._current_sensor_power: dict[str, float] = {}
         self._estimated_total_power: float = 0.0
 
     def set_power_budget(self, power_budget: int) -> None:
         """Update the power budget at runtime."""
         self._power_budget = power_budget
+
+    def set_effective_budget(self, effective_budget: float) -> None:
+        """
+        Update the effective budget used for headroom decisions.
+
+        The effective budget is the operating ceiling the balancer keeps the
+        load under. It equals the power budget unless sustained-load shedding
+        is enabled, in which case it is the configured percentage of the
+        budget.
+        """
+        self._effective_budget = effective_budget
 
     def initialize_power_tracking(self) -> None:
         """Initialize power tracking by reading initial sensor states."""
@@ -216,16 +228,16 @@ class PowerMonitor:
 
     def would_exceed_budget(self, power_to_add: float) -> bool:
         """
-        Check if adding the given power would exceed the budget.
+        Check if adding the given power would exceed the effective budget.
 
         Args:
             power_to_add: Power in watts to potentially add.
 
         Returns:
-            True if adding the power would exceed the budget, False otherwise.
+            True if adding the power would exceed the effective budget.
 
         """
-        return (self._estimated_total_power + power_to_add) > self._power_budget
+        return (self._estimated_total_power + power_to_add) > self._effective_budget
 
     def update_power_estimates(
         self, sensor_config: dict[str, Any], power_to_add: float
@@ -313,6 +325,7 @@ class PowerMonitor:
         return {
             "main_power_sensor_entity_id": self._main_power_sensor_entity_id,
             "power_budget_watt": self._power_budget,
+            "effective_budget_watt": self._effective_budget,
             "estimated_total_power_watt": self._estimated_total_power,
             "tracked_sensor_count": len(self._current_sensor_power),
             "tracked_sensor_power_watt": dict(self._current_sensor_power),

@@ -68,11 +68,22 @@ class BalancingEngine:
         self.hass = hass
         self._monitored_sensors = monitored_sensors
         self._power_budget = power_budget
+        self._effective_budget: float = float(power_budget)
         self._reported_balance_down_failure = False
 
     def set_power_budget(self, power_budget: int) -> None:
         """Update the power budget at runtime."""
         self._power_budget = power_budget
+
+    def set_effective_budget(self, effective_budget: float) -> None:
+        """
+        Update the effective budget used for restoration headroom.
+
+        Restorations are only allowed when the appliance fits under the
+        effective budget, so the balancer never turns an appliance back on
+        into a load level that would immediately trigger shedding again.
+        """
+        self._effective_budget = effective_budget
 
     def _is_non_binary_active_state_entity(self, entity_id: str) -> bool:
         """Check if an entity uses non-binary active states."""
@@ -117,7 +128,7 @@ class BalancingEngine:
                 continue
 
             current_power = callbacks.get_total_power()
-            available_budget = self._power_budget - current_power
+            available_budget = self._effective_budget - current_power
 
             expected_power = callbacks.get_expected_power_restoration(
                 appliance_entity_id
@@ -172,7 +183,8 @@ class BalancingEngine:
         reduce_estimated_power_callback: Any,
         is_appliance_balanced_off_callback: Any,
         turn_off_appliance_callback: Any,
-    ) -> None:
+        reason: str | None = None,
+    ) -> bool:
         """
         Turn off appliances to bring power usage below budget.
 
@@ -183,8 +195,17 @@ class BalancingEngine:
             is_appliance_balanced_off_callback: Callback to check if appliance
                 is balanced off.
             turn_off_appliance_callback: Callback to turn off an appliance.
+            reason: Optional reason recorded with the shed. Defaults to the
+                over-budget message.
+
+        Returns:
+            True if a turn-off was initiated, False if no appliance was
+            eligible for shedding.
 
         """
+        shed_reason = reason or (
+            f"Automatic balancing: Exceeded budget of {self._power_budget} W"
+        )
         sensors_to_consider = sorted(
             self._monitored_sensors, key=lambda x: x.get(CONF_IMPORTANCE, 5)
         )
@@ -252,8 +273,7 @@ class BalancingEngine:
 
                         await turn_off_appliance_callback(
                             inner_appliance_id,
-                            f"Automatic balancing: Exceeded budget of "
-                            f"{self._power_budget} W",
+                            shed_reason,
                         )
                     except Exception:
                         if reduced_power > 0:
@@ -272,7 +292,7 @@ class BalancingEngine:
                     turn_off_task(appliance_entity_id, optimistic_reduction)
                 )
                 self._reported_balance_down_failure = False
-                return
+                return True
 
         if self._reported_balance_down_failure:
             _LOGGER.debug(
@@ -284,3 +304,4 @@ class BalancingEngine:
                 "appliances."
             )
             self._reported_balance_down_failure = True
+        return False

@@ -15,7 +15,10 @@ from homeassistant.const import CONF_ENTITY_ID
 from homeassistant.core import Context, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
+)
 from homeassistant.util import dt
 
 if TYPE_CHECKING:
@@ -30,17 +33,31 @@ from .const import (
     CONF_APPLIANCE,
     CONF_COOLDOWN_SECONDS,
     CONF_MAIN_POWER_SENSOR,
+    CONF_NOTIFY_PERSISTENT,
+    CONF_NOTIFY_SERVICE,
     CONF_POWER_BUDGET_WATT,
     CONF_POWER_SENSORS,
+    CONF_SUSTAINED_DURATION_SECONDS,
+    CONF_SUSTAINED_ENABLED,
+    CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_NOTIFY_PERSISTENT,
+    DEFAULT_NOTIFY_SERVICE,
+    DEFAULT_SUSTAINED_DURATION_SECONDS,
+    DEFAULT_SUSTAINED_ENABLED,
+    DEFAULT_SUSTAINED_THRESHOLD_PERCENT,
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
     ISSUE_TRANSLATION_KEY_DEVICE_NOT_CONTROLLABLE,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
+    SUSTAINED_DISARM_GRACE_SECONDS,
+    SUSTAINED_ESCALATION_DWELL_SECONDS,
+    SUSTAINED_ESCALATION_WINDOW_SECONDS,
 )
 from .context_logger import ContextLogger
+from .event_dispatcher import BalancerEventDispatcher
 from .exceptions import ConfigurationError
 from .power_monitor import PowerMonitor
 
@@ -79,6 +96,14 @@ class PowerLoadBalancer:
     _appliance_controller: ApplianceController
     _balancing_engine: BalancingEngine
     _was_over_budget: bool
+    _sustained_enabled: bool
+    _sustained_threshold_percent: int
+    _sustained_duration_seconds: int
+    _sustained_since: float | None
+    _last_sustained_shed_at: float | None
+    _sustained_check_unsub: Callable[[], None] | None
+    _reported_sustained_failure: bool
+    _below_arm_since: float | None
     _unavailable_entities: dict[str, dict[str, Any]]
     _availability_events: list[dict[str, Any]]
     _non_controllable_media_players: set[str]
@@ -121,6 +146,36 @@ class PowerLoadBalancer:
         self._global_cooldown_seconds = config_data.get(
             CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS
         )
+        self._sustained_enabled = bool(
+            config_data.get(CONF_SUSTAINED_ENABLED, DEFAULT_SUSTAINED_ENABLED)
+        )
+        self._sustained_threshold_percent = int(
+            config_data.get(
+                CONF_SUSTAINED_THRESHOLD_PERCENT,
+                DEFAULT_SUSTAINED_THRESHOLD_PERCENT,
+            )
+        )
+        self._sustained_duration_seconds = int(
+            config_data.get(
+                CONF_SUSTAINED_DURATION_SECONDS,
+                DEFAULT_SUSTAINED_DURATION_SECONDS,
+            )
+        )
+        self._sustained_since = None
+        self._last_sustained_shed_at = None
+        self._sustained_check_unsub = None
+        self._reported_sustained_failure = False
+        self._below_arm_since = None
+        self._event_dispatcher = BalancerEventDispatcher(
+            hass,
+            config_data["entry_id"],
+            notify_persistent=bool(
+                config_data.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT)
+            ),
+            notify_service=str(
+                config_data.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
+            ),
+        )
 
         self._power_monitor = PowerMonitor(
             hass,
@@ -129,11 +184,15 @@ class PowerLoadBalancer:
             self._power_budget,
         )
         self._appliance_controller = ApplianceController(
-            hass, self._monitored_sensors, self._global_cooldown_seconds
+            hass,
+            self._monitored_sensors,
+            self._global_cooldown_seconds,
+            self._event_dispatcher,
         )
         self._balancing_engine = BalancingEngine(
             hass, self._monitored_sensors, self._power_budget
         )
+        self._apply_effective_budget()
 
         monitored_sensor_ids = [
             sensor.get(CONF_ENTITY_ID, "unknown") for sensor in self._monitored_sensors
@@ -164,6 +223,22 @@ class PowerLoadBalancer:
 
         self._power_monitor.initialize_power_tracking()
 
+        self._initialize_availability_tracking()
+        self._initialize_controllability_tracking()
+
+        _LOGGER.debug("PowerLoadBalancer setup complete.")
+
+    @callback
+    def async_start_listening(self) -> None:
+        """
+        Register the state-change listeners that drive balancing.
+
+        Kept separate from async_setup so the entity platforms (and the
+        Enabled switch's restored state in particular) are fully set up
+        before any event can trigger a shed. Without this split, a balancer
+        the user had disabled could shed during the startup window between
+        listener registration and the switch restoring its 'off' state.
+        """
         self._main_power_sensor_unsub = async_track_state_change_event(
             self.hass,
             self._main_power_sensor_entity_id,
@@ -188,10 +263,7 @@ class PowerLoadBalancer:
                 self._handle_appliance_state_change,
             )
 
-        self._initialize_availability_tracking()
-        self._initialize_controllability_tracking()
-
-        _LOGGER.debug("PowerLoadBalancer setup complete.")
+        _LOGGER.debug("PowerLoadBalancer listeners registered.")
 
     def _record_availability_event(self, event: dict[str, Any]) -> None:
         """Record an availability event for diagnostics history."""
@@ -413,6 +485,9 @@ class PowerLoadBalancer:
                 self._appliance_unsub()
                 self._appliance_unsub = None
 
+            self._enabled = False
+            self._cancel_sustained_check()
+            self._event_dispatcher.async_dismiss_persistent()
             self._power_monitor.clear_tracking()
             self._appliance_controller.cleanup()
             self._clear_unavailable_entity_issues()
@@ -445,21 +520,89 @@ class PowerLoadBalancer:
     def set_enabled(self, enabled: bool) -> None:
         """Set the enabled state of the balancer."""
         self._enabled = enabled
+        self._reset_sustained_tracking()
         _LOGGER.info("Power Load Balancer %s", "enabled" if enabled else "disabled")
 
+    def _reset_sustained_tracking(self) -> None:
+        """Fully reset the sustained-load tracking state."""
+        self._sustained_since = None
+        self._last_sustained_shed_at = None
+        self._reported_sustained_failure = False
+        self._below_arm_since = None
+        self._cancel_sustained_check()
+
+    def _cancel_sustained_check(self) -> None:
+        """Cancel a pending time-based sustained-load re-check, if any."""
+        if self._sustained_check_unsub is not None:
+            self._sustained_check_unsub()
+            self._sustained_check_unsub = None
+
+    def _schedule_sustained_check(self, delay_seconds: float) -> None:
+        """
+        Schedule a time-based re-evaluation of the sustained-load state.
+
+        State-change events alone cannot expire the dwell timer when the
+        main sensor reading flat-lines (no state change means no event), so
+        whenever the tracker is armed a wall-clock callback re-runs the
+        balance check shortly after the dwell would elapse.
+        """
+        self._cancel_sustained_check()
+        self._sustained_check_unsub = async_call_later(
+            self.hass,
+            max(delay_seconds, 1.0),
+            self._handle_sustained_check_timer,
+        )
+
+    @callback
+    def _handle_sustained_check_timer(self, _now: Any) -> None:
+        """Re-run the balance check when the sustained dwell may have elapsed."""
+        self._sustained_check_unsub = None
+        self.async_check_and_balance()
 
     @property
     def power_budget(self) -> int:
         """Return the current power budget."""
         return self._power_budget
 
+    @property
+    def effective_budget(self) -> float:
+        """
+        Return the operating ceiling the balancer keeps the load under.
+
+        With sustained-load shedding enabled this is the configured
+        percentage of the power budget; otherwise it equals the budget.
+        Turn-on vetoes and restorations are all evaluated against this
+        value so the balancer never restores an appliance into a load
+        level that would immediately re-trigger shedding.
+        """
+        if self._sustained_enabled:
+            return self._power_budget * self._sustained_threshold_percent / 100.0
+        return float(self._power_budget)
+
+    def _apply_effective_budget(self) -> None:
+        """Propagate the current effective budget to sub-components."""
+        effective_budget = self.effective_budget
+        self._power_monitor.set_effective_budget(effective_budget)
+        self._balancing_engine.set_effective_budget(effective_budget)
 
     def set_power_budget(self, budget: int) -> None:
         """Set the power budget and propagate to sub-components."""
+        if budget == self._power_budget:
+            return
+        old_budget = self._power_budget
         self._power_budget = budget
         self._power_monitor.set_power_budget(budget)
         self._balancing_engine.set_power_budget(budget)
-        _LOGGER.info("Power budget updated to %s W", budget)
+        self._apply_effective_budget()
+        _LOGGER.info(
+            "Power budget updated to %s W (effective budget %s W)",
+            budget,
+            round(self.effective_budget),
+        )
+        self._event_dispatcher.add_log_entry(
+            f"Power budget changed from {old_budget} W to {budget} W "
+            f"(effective {round(self.effective_budget)} W)"
+        )
 
     @property
     def skip_reload(self) -> bool:
@@ -474,6 +617,7 @@ class PowerLoadBalancer:
     async def async_disable_and_restore(self) -> None:
         """Disable balancing and restore all balanced-off appliances."""
         self._enabled = False
+        self._reset_sustained_tracking()
         _LOGGER.info(
             "Power Load Balancer disabled, restoring all balanced-off appliances"
         )
@@ -500,7 +644,7 @@ class PowerLoadBalancer:
 
         """
         self._event_log_sensor = sensor
-        self._appliance_controller.set_event_log_sensor(sensor)
+        self._event_dispatcher.set_sensor(sensor)
 
     async def _handle_power_sensor_state_change(self, event: Any) -> None:
         """
@@ -575,6 +719,9 @@ class PowerLoadBalancer:
         self._appliance_controller.remove_from_balanced_off(entity_id)
         self._appliance_controller.cancel_scheduled_turn_on(entity_id)
 
+        if not self._enabled:
+            return
+
         for sensor_config in self._monitored_sensors:
             if sensor_config.get(CONF_APPLIANCE) == entity_id:
                 power_to_add = self._power_monitor.calculate_sensor_power(sensor_config)
@@ -582,7 +729,11 @@ class PowerLoadBalancer:
                 if self._power_monitor.would_exceed_budget(power_to_add):
                     await self._appliance_controller.turn_off_appliance(
                         entity_id,
-                        reason=f"Power {power_to_add}W would exceed budget",
+                        reason=(
+                            f"Power {power_to_add} W would exceed the "
+                            f"effective budget of "
+                            f"{round(self.effective_budget)} W"
+                        ),
                     )
                     return
 
@@ -613,11 +764,14 @@ class PowerLoadBalancer:
 
         current_total_power = self.get_total_house_power()
         is_over_budget = current_total_power > self._power_budget
+        sustained_shed_due = self._update_sustained_state(current_total_power)
 
         _LOGGER.debug(
-            "Checking balance: Current total power = %s W, Budget = %s W",
+            "Checking balance: Current total power = %s W, Budget = %s W, "
+            "Effective budget = %s W",
             current_total_power,
             self._power_budget,
+            self.effective_budget,
         )
 
         if is_over_budget:
@@ -633,7 +787,52 @@ class PowerLoadBalancer:
                     current_total_power,
                     self._power_budget,
                 )
-            self._balance_down()
+            shed_initiated = self._balance_down()
+            if shed_initiated and self._sustained_since is not None:
+                self._record_sustained_shed(self.hass.loop.time())
+        elif sustained_shed_due:
+            now = self.hass.loop.time()
+            sustained_seconds = (
+                round(now - self._sustained_since)
+                if self._sustained_since is not None
+                else 0
+            )
+            shed_initiated = self._balance_down(
+                f"Sustained load: at or above {round(self.effective_budget)} W "
+                f"({self._sustained_threshold_percent}% of "
+                f"{self._power_budget} W budget) for {sustained_seconds} s"
+            )
+            if shed_initiated:
+                _LOGGER.warning(
+                    "Sustained load: %s W has stayed at or above the effective "
+                    "budget of %s W (%s%% of %s W) for %s s. Shedding.",
+                    current_total_power,
+                    round(self.effective_budget),
+                    self._sustained_threshold_percent,
+                    self._power_budget,
+                    sustained_seconds,
+                )
+                self._reported_sustained_failure = False
+                self._record_sustained_shed(now)
+            else:
+                if not self._reported_sustained_failure:
+                    _LOGGER.warning(
+                        "Sustained load: %s W at or above the effective budget "
+                        "of %s W for %s s, but no appliance is available to "
+                        "shed.",
+                        current_total_power,
+                        round(self.effective_budget),
+                        sustained_seconds,
+                    )
+                    self._event_dispatcher.add_log_entry(
+                        f"Unable to shed: {round(current_total_power)} W at or "
+                        f"above the effective budget of "
+                        f"{round(self.effective_budget)} W with no appliance "
+                        f"available"
+                    )
+                    self._reported_sustained_failure = True
+                self._sustained_since = now
+                self._schedule_sustained_check(self._current_dwell_seconds(now))
         else:
             if self._was_over_budget:
                 _LOGGER.info(
@@ -650,15 +849,168 @@ class PowerLoadBalancer:
 
         self._was_over_budget = is_over_budget
 
+        if (
+            self._sustained_enabled
+            and self._sustained_since is not None
+            and self._sustained_check_unsub is None
+        ):
+            now = self.hass.loop.time()
+            remaining = self._current_dwell_seconds(now) - (now - self._sustained_since)
+            self._schedule_sustained_check(remaining)
+
+    def _record_sustained_shed(self, now: float) -> None:
+        """
+        Restart the dwell clock after a shed while the load is still at level.
+
+        Any shed (budget-triggered or sustained-triggered) resets the dwell
+        so the next rung of the ladder is only shed after the escalation
+        dwell has passed with the load still at or above the effective
+        budget — never immediately on the next sample.
+        """
+        self._last_sustained_shed_at = now
+        self._sustained_since = now
+        self._schedule_sustained_check(self._current_dwell_seconds(now))
+
+    def _current_dwell_seconds(self, now: float) -> float:
+        """Return the dwell that currently applies before the next shed."""
+        dwell_seconds = float(self._sustained_duration_seconds)
+        if (
+            self._last_sustained_shed_at is not None
+            and now - self._last_sustained_shed_at
+            <= SUSTAINED_ESCALATION_WINDOW_SECONDS
+        ):
+            dwell_seconds = min(
+                dwell_seconds, float(SUSTAINED_ESCALATION_DWELL_SECONDS)
+            )
+        return dwell_seconds
+
+    def _update_sustained_state(self, current_total_power: float) -> bool:
+        """
+        Track how long the load has stayed at or above the effective budget.
+
+        Arms a monotonic timer when the load reaches the effective budget and
+        disarms it when the load drops below. After a sustained shed the dwell
+        time shortens to the escalation dwell while the load keeps sitting at
+        or above the effective budget, so consecutive rungs of the appliance
+        ladder are shed at a faster cadence when one shed was not enough.
+
+        Args:
+            current_total_power: Latest total power reading in watts.
+
+        Returns:
+            True when the sustained-load dwell time has elapsed and an
+            appliance should be shed.
+
+        """
+        if not self._sustained_enabled or self._power_budget <= 0:
+            self._reset_sustained_tracking()
+            return False
+
+        main_sensor_state = self.hass.states.get(self._main_power_sensor_entity_id)
+        if main_sensor_state is None or main_sensor_state.state in (
+            "unknown",
+            "unavailable",
+        ):
+            if self._sustained_since is not None:
+                _LOGGER.debug(
+                    "Sustained-load tracking disarmed: main power sensor %s "
+                    "is unavailable, last reading is stale",
+                    self._main_power_sensor_entity_id,
+                )
+            self._reset_sustained_tracking()
+            return False
+
+        if current_total_power < self.effective_budget:
+            if self._sustained_since is None:
+                self._below_arm_since = None
+                return False
+            now = self.hass.loop.time()
+            if self._below_arm_since is None:
+                self._below_arm_since = now
+                _LOGGER.debug(
+                    "Sustained-load dip: load %s W below effective budget "
+                    "%s W; disarming in %s s unless it recovers",
+                    current_total_power,
+                    round(self.effective_budget),
+                    SUSTAINED_DISARM_GRACE_SECONDS,
+                )
+            if now - self._below_arm_since >= SUSTAINED_DISARM_GRACE_SECONDS:
+                _LOGGER.debug(
+                    "Sustained-load tracking disarmed: load stayed below the "
+                    "effective budget of %s W for %s s",
+                    round(self.effective_budget),
+                    SUSTAINED_DISARM_GRACE_SECONDS,
+                )
+                self._reset_sustained_tracking()
+            else:
+                self._schedule_sustained_check(
+                    SUSTAINED_DISARM_GRACE_SECONDS - (now - self._below_arm_since)
+                )
+            return False
+
+        now = self.hass.loop.time()
+        if (
+            self._below_arm_since is not None
+            and now - self._below_arm_since >= SUSTAINED_DISARM_GRACE_SECONDS
+        ):
+            _LOGGER.debug(
+                "Sustained-load tracking disarmed retroactively: the load was "
+                "below the effective budget for over %s s during a gap with "
+                "no sensor updates; starting a fresh episode",
+                SUSTAINED_DISARM_GRACE_SECONDS,
+            )
+            self._reset_sustained_tracking()
+        self._below_arm_since = None
+        if self._sustained_since is None:
+            self._sustained_since = now
+            _LOGGER.debug(
+                "Sustained-load tracking armed: load %s W at or above "
+                "effective budget %s W",
+                current_total_power,
+                round(self.effective_budget),
+            )
+
+        dwell_seconds = self._current_dwell_seconds(now)
+        elapsed = now - self._sustained_since
+        if elapsed < dwell_seconds:
+            if self._sustained_check_unsub is None:
+                self._schedule_sustained_check(dwell_seconds - elapsed)
+            return False
+        return True
+
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return runtime diagnostics data for troubleshooting."""
+        now = self.hass.loop.time()
         return {
             "entry_id": self.entry.entry_id,
             "power_budget_watt": self._power_budget,
+            "effective_budget_watt": self.effective_budget,
             "main_power_sensor_entity_id": self._main_power_sensor_entity_id,
             "monitored_sensor_count": len(self._monitored_sensors),
             "monitored_sensors": self._monitored_sensors,
             "is_over_budget": self._was_over_budget,
+            "sustained_shedding": {
+                "enabled": self._sustained_enabled,
+                "threshold_percent": self._sustained_threshold_percent,
+                "duration_seconds": self._sustained_duration_seconds,
+                "armed": self._sustained_since is not None,
+                "armed_for_seconds": (
+                    round(now - self._sustained_since)
+                    if self._sustained_since is not None
+                    else None
+                ),
+                "below_arm_for_seconds": (
+                    round(now - self._below_arm_since)
+                    if self._below_arm_since is not None
+                    else None
+                ),
+                "last_shed_seconds_ago": (
+                    round(now - self._last_sustained_shed_at)
+                    if self._last_sustained_shed_at is not None
+                    else None
+                ),
+                "check_timer_scheduled": self._sustained_check_unsub is not None,
+            },
             "listener_status": {
                 "main_power_sensor_listener": self._main_power_sensor_unsub is not None,
                 "monitored_sensors_listener": self._monitored_sensors_unsub is not None,
@@ -668,6 +1020,7 @@ class PowerLoadBalancer:
                 "currently_unavailable": dict(self._unavailable_entities),
                 "recent_events": list(self._availability_events),
             },
+            "notifications": self._event_dispatcher.get_diagnostics_snapshot(),
             "power_monitor": self._power_monitor.get_diagnostics_snapshot(),
             "appliance_controller": (
                 self._appliance_controller.get_diagnostics_snapshot()
@@ -712,13 +1065,14 @@ class PowerLoadBalancer:
         self._appliance_controller.remove_from_balanced_off(entity_id)
 
     @callback
-    def _balance_down(self) -> None:
+    def _balance_down(self, reason: str | None = None) -> bool:
         """Turn off appliances to bring power usage below budget."""
-        self._balancing_engine.balance_down(
+        return self._balancing_engine.balance_down(
             self._get_sensor_power_for_appliance,
             self._power_monitor.reduce_estimated_power,
             self._appliance_controller.is_appliance_balanced_off,
             self._turn_off_appliance_for_balancing,
+            reason,
         )
 
     async def _turn_off_appliance_for_balancing(
@@ -732,16 +1086,34 @@ class PowerLoadBalancer:
             reason: Reason for turning off the appliance.
 
         """
-        await self._appliance_controller.turn_off_appliance_service(entity_id, reason)
-        self._appliance_controller.mark_appliance_balanced_off(entity_id, reason)
-
         expected_power = self._get_sensor_power_for_appliance(entity_id)
+        self._appliance_controller.mark_appliance_balanced_off(entity_id, reason)
+        try:
+            await self._appliance_controller.turn_off_appliance_service(
+                entity_id, reason
+            )
+        except Exception:
+            appliance_state = self.hass.states.get(entity_id)
+            if appliance_state is not None and appliance_state.state == "off":
+                _LOGGER.warning(
+                    "Turn-off service call for %s failed but the appliance "
+                    "is off; keeping balanced-off tracking",
+                    entity_id,
+                )
+            else:
+                self._appliance_controller.remove_from_balanced_off(entity_id)
+                raise
+
         self._appliance_controller.schedule_auto_turn_on(
             entity_id,
             expected_power,
             self.get_total_house_power,
-            self._power_budget,
+            self._get_effective_budget,
         )
+
+    def _get_effective_budget(self) -> float:
+        """Return the current effective budget for restore headroom checks."""
+        return self.effective_budget
 
     def _get_sensor_power_for_appliance(self, appliance_entity_id: str) -> float:
         """Get the current power consumption for an appliance's sensor."""
