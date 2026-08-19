@@ -10,6 +10,8 @@ turn_off_appliance:
             - switch
             - light
             - climate
+            - media_player
+            - water_heater
       description: The entity ID of the appliance to turn off
     reason:
       required: false
@@ -29,6 +31,8 @@ turn_on_appliance:
             - switch
             - light
             - climate
+            - media_player
+            - water_heater
       description: The entity ID of the appliance to turn on
     reason:
       required: false

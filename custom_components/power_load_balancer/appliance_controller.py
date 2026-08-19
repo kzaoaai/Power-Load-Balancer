@@ -76,6 +76,7 @@ class ApplianceController:
         self._scheduled_auto_turn_ons: dict[str, asyncio.Task[Any]] = {}
         self._expected_power_restoration: dict[str, float] = {}
         self._previous_hvac_modes: dict[str, str] = {}
+        self._previous_operation_modes: dict[str, str] = {}
 
     def set_event_log_sensor(self, sensor: Any) -> None:
         """
@@ -220,6 +221,19 @@ class ApplianceController:
         """
         return entity_id.startswith("climate.")
 
+    def _is_water_heater_entity(self, entity_id: str) -> bool:
+        """
+        Check if an entity is a water_heater entity.
+
+        Args:
+            entity_id: Entity ID to check.
+
+        Returns:
+            True if the entity is a water_heater entity, False otherwise.
+
+        """
+        return entity_id.startswith("water_heater.")
+
     def _is_non_binary_active_state_entity(self, entity_id: str) -> bool:
         """Check if an entity uses non-binary active states."""
         return entity_id.startswith(
@@ -292,6 +306,51 @@ class ApplianceController:
         return (
             "set_hvac_mode",
             {"entity_id": entity_id, "hvac_mode": "off"},
+        )
+
+    def _prepare_water_heater_turn_off(
+        self, entity_id: str, appliance_state: State, logger: ContextLogger, reason: str
+    ) -> tuple[str, dict[str, str]]:
+        """
+        Prepare water_heater entity turn-off with operation mode saving.
+
+        Saves the current operation mode before turning off the water_heater.
+
+        Args:
+            entity_id: Entity ID of the water_heater entity.
+            appliance_state: Current state of the entity.
+            logger: Context logger for this operation.
+            reason: Reason for turning off the appliance.
+
+        Returns:
+            Tuple of (service, service_data)
+
+        """
+        current_mode = appliance_state.state
+        if current_mode not in ("off", "unknown", "unavailable"):
+            self._previous_operation_modes[entity_id] = current_mode
+            logger.debug(
+                "Saved water_heater operation mode",
+                entity_id=entity_id,
+                operation_mode=current_mode,
+            )
+        else:
+            logger.warning(
+                "Water heater is active but current mode cannot be saved",
+                entity_id=entity_id,
+                current_mode=current_mode,
+            )
+
+        logger.debug(
+            "Turning off water_heater entity",
+            entity_id=entity_id,
+            previous_mode=self._previous_operation_modes.get(entity_id),
+            reason=reason,
+        )
+
+        return (
+            "set_operation_mode",
+            {"entity_id": entity_id, "operation_mode": "off"},
         )
 
     def _is_valid_active_hvac_mode(
@@ -370,6 +429,32 @@ class ApplianceController:
                     "hvac_mode": previous_mode,
                 },
             )
+
+        if self._is_water_heater_entity(entity_id):
+            previous_mode = self._previous_operation_modes.get(entity_id)
+            if previous_mode and previous_mode not in ("off", "unknown", "unavailable"):
+                logger.debug(
+                    "Restoring water_heater to previous operation mode",
+                    entity_id=entity_id,
+                    operation_mode=previous_mode,
+                    reason=reason,
+                )
+                return (
+                    domain,
+                    "set_operation_mode",
+                    {
+                        "entity_id": entity_id,
+                        "operation_mode": previous_mode,
+                    },
+                )
+
+            # Fallback: use turn_on
+            logger.debug(
+                "No previous operation mode for water_heater, using turn_on",
+                entity_id=entity_id,
+                reason=reason,
+            )
+            return domain, "turn_on", {"entity_id": entity_id}
 
         logger.debug(
             "Calling turn_on service",
@@ -467,6 +552,38 @@ class ApplianceController:
                     return int(device_cooldown)
                 break
         return self._global_cooldown_seconds
+
+    def is_in_cooldown(self, entity_id: str) -> bool:
+        """
+        Check if an appliance is still in its cooldown period.
+
+        An appliance is in cooldown if it was turned off by the balancer
+        less than its configured cooldown time ago.
+
+        Args:
+            entity_id: Entity ID of the appliance.
+
+        Returns:
+            True if the appliance is still in cooldown, False otherwise.
+
+        """
+        if entity_id not in self._balanced_off_appliances:
+            return False
+
+        off_info = self._balanced_off_appliances[entity_id]
+        off_time = off_info.get("timestamp", 0)
+        cooldown = self.get_cooldown_for_appliance(entity_id)
+        elapsed = self.hass.loop.time() - off_time
+
+        if elapsed < cooldown:
+            _LOGGER.debug(
+                "Appliance %s still in cooldown: %.1f/%.0f seconds elapsed",
+                entity_id,
+                elapsed,
+                cooldown,
+            )
+            return True
+        return False
 
     def schedule_auto_turn_on(
         self,
@@ -593,6 +710,31 @@ class ApplianceController:
         except Exception:
             logger.exception("Failed to schedule auto turn-on", entity_id=entity_id)
 
+    def _prepare_turn_off_service(
+        self,
+        entity_id: str,
+        appliance_state: State,
+        logger: ContextLogger,
+        reason: str,
+        domain: str,
+    ) -> tuple[str, dict[str, str]]:
+        """Return the (service, service_data) pair that turns an appliance off."""
+        if self._is_climate_entity(entity_id):
+            return self._prepare_climate_turn_off(
+                entity_id, appliance_state, logger, reason
+            )
+        if self._is_water_heater_entity(entity_id):
+            return self._prepare_water_heater_turn_off(
+                entity_id, appliance_state, logger, reason
+            )
+        logger.debug(
+            "Turning off appliance",
+            entity_id=entity_id,
+            reason=reason,
+            domain=domain,
+        )
+        return ("turn_off", {"entity_id": entity_id})
+
     @retry_with_backoff(max_retries=2, backoff_factor=0.5, retry_on=(RetryableError,))
     async def turn_off_appliance(self, entity_id: str, reason: str = "") -> None:
         """
@@ -621,20 +763,9 @@ class ApplianceController:
                 return
 
             domain = entity_id.split(".", maxsplit=1)[0]
-
-            if self._is_climate_entity(entity_id):
-                service, service_data = self._prepare_climate_turn_off(
-                    entity_id, appliance_state, logger, reason
-                )
-            else:
-                service = "turn_off"
-                service_data = {"entity_id": entity_id}
-                logger.debug(
-                    "Turning off appliance",
-                    entity_id=entity_id,
-                    reason=reason,
-                    domain=domain,
-                )
+            service, service_data = self._prepare_turn_off_service(
+                entity_id, appliance_state, logger, reason, domain
+            )
 
             params = ServiceCallParams(
                 hass=self.hass,
@@ -643,6 +774,7 @@ class ApplianceController:
                 service_data=service_data,
                 logger=logger,
             )
+
             await safe_service_call(params)
 
             self.mark_appliance_balanced_off(entity_id, reason)
@@ -744,20 +876,9 @@ class ApplianceController:
                 return
 
             domain = entity_id.split(".", maxsplit=1)[0]
-
-            if self._is_climate_entity(entity_id):
-                service, service_data = self._prepare_climate_turn_off(
-                    entity_id, appliance_state, logger, reason
-                )
-            else:
-                service = "turn_off"
-                service_data = {"entity_id": entity_id}
-                logger.debug(
-                    "Calling turn_off service",
-                    entity_id=entity_id,
-                    domain=domain,
-                    reason=reason,
-                )
+            service, service_data = self._prepare_turn_off_service(
+                entity_id, appliance_state, logger, reason, domain
+            )
 
             params = ServiceCallParams(
                 hass=self.hass,
@@ -981,6 +1102,7 @@ class ApplianceController:
         self._expected_power_restoration.clear()
         self._balanced_off_appliances.clear()
         self._previous_hvac_modes.clear()
+        self._previous_operation_modes.clear()
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return runtime diagnostics data for troubleshooting."""

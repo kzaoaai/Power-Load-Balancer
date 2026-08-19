@@ -38,6 +38,7 @@ class BalancingCallbacks:
     cancel_scheduled_turn_on: Callable[[str], None]
     reduce_estimated_power: Callable[[float], None]
     is_appliance_balanced_off: Callable[[str], bool]
+    is_in_cooldown: Callable[[str], bool]
 
 
 class BalancingEngine:
@@ -68,6 +69,10 @@ class BalancingEngine:
         self._monitored_sensors = monitored_sensors
         self._power_budget = power_budget
         self._reported_balance_down_failure = False
+
+    def set_power_budget(self, power_budget: int) -> None:
+        """Update the power budget at runtime."""
+        self._power_budget = power_budget
 
     def _is_non_binary_active_state_entity(self, entity_id: str) -> bool:
         """Check if an entity uses non-binary active states."""
@@ -104,6 +109,9 @@ class BalancingEngine:
         )
 
         for appliance_entity_id in appliances_to_restore:
+            if callbacks.is_in_cooldown(appliance_entity_id):
+                continue
+
             appliance_state = self.hass.states.get(appliance_entity_id)
             if appliance_state and appliance_state.state != "off":
                 continue

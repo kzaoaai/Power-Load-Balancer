@@ -36,8 +36,8 @@ from .const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
-    ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     ISSUE_TRANSLATION_KEY_DEVICE_NOT_CONTROLLABLE,
+    ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
 )
 from .context_logger import ContextLogger
@@ -82,6 +82,8 @@ class PowerLoadBalancer:
     _unavailable_entities: dict[str, dict[str, Any]]
     _availability_events: list[dict[str, Any]]
     _non_controllable_media_players: set[str]
+    _enabled: bool
+    _skip_reload: bool
 
     def __init__(
         self,
@@ -110,6 +112,8 @@ class PowerLoadBalancer:
         self._unavailable_entities = {}
         self._availability_events = []
         self._non_controllable_media_players = set()
+        self._enabled = True
+        self._skip_reload = False
 
         self._main_power_sensor_entity_id = config_data[CONF_MAIN_POWER_SENSOR]
         self._monitored_sensors = config_data.get(CONF_POWER_SENSORS, [])
@@ -433,6 +437,60 @@ class PowerLoadBalancer:
         """Return the device ID."""
         return self._device_id
 
+    @property
+    def enabled(self) -> bool:
+        """Return whether the balancer is enabled."""
+        return self._enabled
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Set the enabled state of the balancer."""
+        self._enabled = enabled
+        _LOGGER.info("Power Load Balancer %s", "enabled" if enabled else "disabled")
+
+
+    @property
+    def power_budget(self) -> int:
+        """Return the current power budget."""
+        return self._power_budget
+
+
+    def set_power_budget(self, budget: int) -> None:
+        """Set the power budget and propagate to sub-components."""
+        self._power_budget = budget
+        self._power_monitor.set_power_budget(budget)
+        self._balancing_engine.set_power_budget(budget)
+        _LOGGER.info("Power budget updated to %s W", budget)
+
+    @property
+    def skip_reload(self) -> bool:
+        """Return whether the next config update should skip reload."""
+        return self._skip_reload
+
+    @skip_reload.setter
+    def skip_reload(self, value: bool) -> None:
+        """Set whether the next config update should skip reload."""
+        self._skip_reload = value
+
+    async def async_disable_and_restore(self) -> None:
+        """Disable balancing and restore all balanced-off appliances."""
+        self._enabled = False
+        _LOGGER.info(
+            "Power Load Balancer disabled, restoring all balanced-off appliances"
+        )
+
+        balanced_off = self._appliance_controller.get_balanced_off_appliances()
+        for entity_id in balanced_off:
+            self._appliance_controller.cancel_scheduled_turn_on(entity_id)
+            try:
+                await self._appliance_controller.turn_on_appliance_service(
+                    entity_id, "Balancer disabled - restoring appliance"
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to restore appliance %s during disable", entity_id
+                )
+            self._appliance_controller.remove_from_balanced_off(entity_id)
+
     def register_event_log_sensor(self, sensor: Any) -> None:
         """
         Register the event log sensor instance.
@@ -550,6 +608,9 @@ class PowerLoadBalancer:
     @callback
     def async_check_and_balance(self) -> None:
         """Check power usage and perform balancing if necessary."""
+        if not self._enabled:
+            return
+
         current_total_power = self.get_total_house_power()
         is_over_budget = current_total_power > self._power_budget
 
@@ -629,6 +690,7 @@ class PowerLoadBalancer:
             is_appliance_balanced_off=(
                 self._appliance_controller.is_appliance_balanced_off
             ),
+            is_in_cooldown=self._appliance_controller.is_in_cooldown,
         )
 
         self._balancing_engine.balance_up(

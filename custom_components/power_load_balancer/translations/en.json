@@ -9,6 +9,18 @@
       "description": "The configured media player {entity_id} does not support turning on or off. Power Load Balancer will not be able to control it for balancing. Choose a different media player or remove it from the configuration if it should not be managed."
     }
   },
+  "entity": {
+    "switch": {
+      "enabled": {
+        "name": "Enabled"
+      }
+    },
+    "number": {
+      "power_budget": {
+        "name": "Power Budget"
+      }
+    }
+  },
   "services": {
     "turn_off_appliance": {
       "name": "Turn Off Appliance",
@@ -93,7 +105,7 @@
           "name": "Custom Name (Optional)",
           "importance": "Importance (1=Low, 10=High)",
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
-          "appliance": "Controllable Appliance (Switch, Light, Climate or Media Player)",
+          "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)"
         },
         "description": "Add a new power sensor to monitor and its corresponding controllable appliance.",
@@ -109,7 +121,7 @@
           "name": "Custom Name (Optional)",
           "importance": "Importance (1=Low, 10=High)",
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
-          "appliance": "Controllable Appliance (Switch, Light, Climate or Media Player)",
+          "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
           "remove_sensor": "Remove Sensor"
         },
@@ -155,7 +167,7 @@
           "name": "Custom Name (Optional)",
           "importance": "Importance (1=Low, 10=High)",
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
-          "appliance": "Controllable Appliance (Switch, Light, Climate or Media Player)",
+          "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)"
         },
         "description": "Add a new power sensor to monitor and its corresponding controllable appliance.",
@@ -171,7 +183,7 @@
           "name": "Custom Name (Optional)",
           "importance": "Importance (1=Low, 10=High)",
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
-          "appliance": "Controllable Appliance (Switch, Light, Climate or Media Player)",
+          "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
           "remove_sensor": "Remove Sensor"
         },

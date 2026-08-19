@@ -9,6 +9,18 @@
       "description": "Il lettore multimediale configurato {entity_id} non supporta l'accensione o lo spegnimento. Power Load Balancer non potrà controllarlo per il bilanciamento. Scegli un altro lettore multimediale o rimuovilo dalla configurazione se non deve essere gestito."
     }
   },
+  "entity": {
+    "switch": {
+      "enabled": {
+        "name": "Abilitato"
+      }
+    },
+    "number": {
+      "power_budget": {
+        "name": "Budget di potenza"
+      }
+    }
+  },
   "services": {
     "turn_off_appliance": {
       "name": "Spegni dispositivo",
@@ -93,7 +105,7 @@
           "name": "Nome personalizzato (opzionale)",
           "importance": "Importanza (1=Bassa, 10=Alta)",
           "last_resort": "Ultima risorsa (spegni solo se assolutamente necessario)",
-          "appliance": "Elettrodomestico controllabile (Interruttore, Luce, Clima o Lettore Multimediale)",
+          "appliance": "Elettrodomestico controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
           "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)"
         },
         "description": "Aggiungi un nuovo sensore di potenza da monitorare e il relativo elettrodomestico controllabile.",
@@ -109,7 +121,7 @@
           "name": "Nome personalizzato (opzionale)",
           "importance": "Importanza (1=Bassa, 10=Alta)",
           "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
-          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima o Lettore Multimediale)",
+          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
           "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
           "remove_sensor": "Rimuovi sensore"
         },
@@ -155,7 +167,7 @@
           "name": "Nome personalizzato (opzionale)",
           "importance": "Importanza (1=Bassa, 10=Alta)",
           "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
-          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima o Lettore Multimediale)",
+          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
           "device_cooldown": "Override tempo di attesa dispositivo (secondi, lascia -1 per predefinito)"
         },
         "description": "Aggiungi un nuovo sensore di potenza da monitorare e il relativo dispositivo controllabile.",
@@ -171,7 +183,7 @@
           "name": "Nome personalizzato (opzionale)",
           "importance": "Importanza (1=Bassa, 10=Alta)",
           "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
-          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima o Lettore Multimediale)",
+          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
           "device_cooldown": "Override tempo di attesa dispositivo (secondi, lascia -1 per predefinito)",
           "remove_sensor": "Rimuovi sensore"
         },

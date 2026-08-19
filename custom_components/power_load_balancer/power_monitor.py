@@ -55,6 +55,10 @@ class PowerMonitor:
         self._current_sensor_power: dict[str, float] = {}
         self._estimated_total_power: float = 0.0
 
+    def set_power_budget(self, power_budget: int) -> None:
+        """Update the power budget at runtime."""
+        self._power_budget = power_budget
+
     def initialize_power_tracking(self) -> None:
         """Initialize power tracking by reading initial sensor states."""
         self._current_sensor_power = {}
