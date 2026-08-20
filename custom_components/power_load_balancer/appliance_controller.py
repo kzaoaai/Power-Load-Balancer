@@ -19,7 +19,9 @@ from .clock import monotonic
 from .const import (
     CONF_APPLIANCE,
     CONF_DEVICE_COOLDOWN,
+    CONF_NOMINAL_POWER_WATT,
     DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_NOMINAL_POWER_WATT,
     DOMAIN,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
@@ -288,24 +290,29 @@ class ApplianceController:
 
     def get_nominal_power(self, entity_id: str) -> float:
         """
-        Return an appliance's own declared draw, or 0 when it declares none.
+        Return an appliance's configured nameplate draw, or 0 if none is set.
 
-        A shed appliance draws nothing, and its power sensor may lag by a
-        minute besides, so neither can size what letting it run would cost.
-        An integration that publishes a nominal rating answers immediately.
+        A shed appliance draws nothing, and a power sensor that polls once a
+        minute reads nothing for a while after one starts, so neither can size
+        what letting it run would cost. A nameplate answers immediately. Zero
+        means unknown, never that the appliance is free.
         """
-        api = SHED_AWARE_PLATFORMS.get(self._get_entity_platform(entity_id) or "")
-        attribute = (api or {}).get("nominal_power_attribute")
-        if not attribute:
-            return 0.0
-
-        state = self.hass.states.get(entity_id)
-        if state is None:
-            return 0.0
-        try:
-            return max(float(state.attributes.get(attribute) or 0), 0.0)
-        except (TypeError, ValueError):
-            return 0.0
+        for sensor_config in self._monitored_sensors:
+            if sensor_config.get(CONF_APPLIANCE) != entity_id:
+                continue
+            try:
+                return max(
+                    float(
+                        sensor_config.get(
+                            CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
+                        )
+                        or 0
+                    ),
+                    0.0,
+                )
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
 
     def _get_entity_platform(self, entity_id: str) -> str | None:
         """Return the integration platform that provides an entity."""

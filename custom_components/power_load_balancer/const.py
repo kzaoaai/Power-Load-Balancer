@@ -12,6 +12,9 @@ CONF_IMPORTANCE = "importance"
 CONF_LAST_RESORT = "last_resort"
 CONF_COOLDOWN_SECONDS = "cooldown_seconds"
 CONF_DEVICE_COOLDOWN = "device_cooldown"
+CONF_NOMINAL_POWER_WATT = "nominal_power_watt"
+
+DEFAULT_NOMINAL_POWER_WATT = 0
 
 SERVICE_TURN_OFF_APPLIANCE = "turn_off_appliance"
 SERVICE_TURN_ON_APPLIANCE = "turn_on_appliance"
@@ -51,7 +54,6 @@ SHED_AWARE_PLATFORMS: dict[str, dict[str, str]] = {
         "shed": "shed",
         "release": "release",
         "shed_attribute": "load_shed",
-        "nominal_power_attribute": "nominal_power_w",
     },
 }
 

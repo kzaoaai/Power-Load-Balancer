@@ -111,7 +111,8 @@
           "importance": "Importance (1=Low, 10=High)",
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
           "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
-          "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)"
+          "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
+          "nominal_power_watt": "Nameplate power (W, 0 = unknown)"
         },
         "description": "Add a new power sensor to monitor and its corresponding controllable appliance.",
         "title": "Add Monitored Sensor",
@@ -128,7 +129,8 @@
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
           "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
-          "remove_sensor": "Remove Sensor"
+          "remove_sensor": "Remove Sensor",
+          "nominal_power_watt": "Nameplate power (W, 0 = unknown)"
         },
         "description": "Edit the settings for this monitored power sensor and its appliance.",
         "title": "Edit Monitored Sensor",
@@ -176,7 +178,8 @@
           "importance": "Importance (1=Low, 10=High)",
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
           "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
-          "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)"
+          "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
+          "nominal_power_watt": "Nameplate power (W, 0 = unknown)"
         },
         "description": "Add a new power sensor to monitor and its corresponding controllable appliance.",
         "title": "Add Monitored Sensor",
@@ -193,7 +196,8 @@
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
           "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
-          "remove_sensor": "Remove Sensor"
+          "remove_sensor": "Remove Sensor",
+          "nominal_power_watt": "Nameplate power (W, 0 = unknown)"
         },
         "description": "Edit the settings for this monitored power sensor and its appliance.",
         "title": "Edit Monitored Sensor",

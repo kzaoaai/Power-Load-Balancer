@@ -40,6 +40,7 @@ from .const import (
     CONF_IMPORTANCE,
     CONF_LAST_RESORT,
     CONF_MAIN_POWER_SENSOR,
+    CONF_NOMINAL_POWER_WATT,
     CONF_NOTIFY_PERSISTENT,
     CONF_NOTIFY_SERVICE,
     CONF_POWER_BUDGET_WATT,
@@ -48,6 +49,7 @@ from .const import (
     CONF_SUSTAINED_ENABLED,
     CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_NOMINAL_POWER_WATT,
     DEFAULT_NOTIFY_PERSISTENT,
     DEFAULT_NOTIFY_SERVICE,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
@@ -270,6 +272,21 @@ def _build_sensor_edit_schema(initial_data: dict[str, Any]) -> vol.Schema:
         )
     )
 
+    nominal_power = initial_data.get(
+        CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
+    )
+    schema_dict[vol.Optional(CONF_NOMINAL_POWER_WATT, default=nominal_power)] = (
+        NumberSelector(
+            NumberSelectorConfig(
+                min=0,
+                max=20000,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="W",
+            )
+        )
+    )
+
     schema_dict[vol.Optional("remove_sensor")] = bool
 
     return vol.Schema(schema_dict)
@@ -432,6 +449,17 @@ STEP_ADD_SENSOR_SCHEMA: vol.Schema = vol.Schema(
         ),
         vol.Required(CONF_LAST_RESORT, default=False): bool,
         vol.Required(CONF_APPLIANCE): _get_appliance_selector(),
+        vol.Optional(
+            CONF_NOMINAL_POWER_WATT, default=DEFAULT_NOMINAL_POWER_WATT
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=0,
+                max=20000,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="W",
+            )
+        ),
         vol.Optional(CONF_DEVICE_COOLDOWN, default=-1): NumberSelector(
             NumberSelectorConfig(
                 min=-1,

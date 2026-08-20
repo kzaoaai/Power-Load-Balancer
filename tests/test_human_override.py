@@ -18,6 +18,7 @@ from tests.conftest import (
     UPSTAIRS_POWER,
     balancer_of,
     hold,
+    ladder,
 )
 
 
@@ -140,13 +141,9 @@ async def test_veto_sizes_an_unmeasured_tank_from_its_own_rating(
     appliance's declared rating answers immediately.
     """
     register_shed_platform(UPSTAIRS, DOWNSTAIRS)
-    await setup_balancer()
+    await setup_balancer(power_sensors=ladder(upstairs_nameplate=2500))
 
-    hass.states.async_set(
-        UPSTAIRS,
-        "electric",
-        {"operation_list": ["electric", "off"], "nominal_power_w": 2500},
-    )
+    hass.states.async_set(UPSTAIRS, "electric", {"operation_list": ["electric", "off"]})
     hass.states.async_set(UPSTAIRS_POWER, "0", {"unit_of_measurement": "W"})
     await hold(hass, ARM_LEVEL + 60, 75, clock)
 
@@ -161,11 +158,7 @@ async def test_a_rating_of_zero_means_unknown_not_free(
     """An unset rating must not be read as an appliance that draws nothing."""
     register_shed_platform(UPSTAIRS, DOWNSTAIRS)
     entry = await setup_balancer()
-    hass.states.async_set(
-        UPSTAIRS,
-        "electric",
-        {"operation_list": ["electric", "off"], "nominal_power_w": 0},
-    )
+    hass.states.async_set(UPSTAIRS, "electric", {"operation_list": ["electric", "off"]})
     await hass.async_block_till_done()
 
     controller = balancer_of(hass, entry)._appliance_controller

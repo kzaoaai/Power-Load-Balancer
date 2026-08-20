@@ -209,7 +209,7 @@ def register_shed_platform(hass: HomeAssistant, recorder: ServiceRecorder):
     return _register
 
 
-def ladder(*, include_heater: bool = False) -> list[dict]:
+def ladder(*, include_heater: bool = False, upstairs_nameplate: int = 0) -> list[dict]:
     """Return the appliance ladder: upstairs sheds first, then downstairs."""
     rungs = [
         {
@@ -219,6 +219,7 @@ def ladder(*, include_heater: bool = False) -> list[dict]:
             "importance": 1,
             "last_resort": False,
             "device_cooldown": 180,
+            "nominal_power_watt": upstairs_nameplate,
         },
         {
             "appliance": DOWNSTAIRS,
