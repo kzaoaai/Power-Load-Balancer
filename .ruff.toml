@@ -36,6 +36,9 @@ ignore = [
     "PT019",
     "ARG001",  # fixtures requested for their side effects
     "TC003",
+    "TRY003",  # assertion messages read better inline
+    "EM101",
+    "EM102",
 ]
 
 [lint.flake8-pytest-style]

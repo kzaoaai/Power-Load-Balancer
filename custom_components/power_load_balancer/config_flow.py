@@ -437,6 +437,10 @@ def _process_sensor_input(
     if device_cooldown is not None:
         sensor_config[CONF_DEVICE_COOLDOWN] = int(device_cooldown)
 
+    nominal_power = user_input.get(CONF_NOMINAL_POWER_WATT)
+    if isinstance(nominal_power, (int, float)) and nominal_power > 0:
+        sensor_config[CONF_NOMINAL_POWER_WATT] = int(nominal_power)
+
     return errors, sensor_config
 
 
@@ -713,6 +717,9 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_LAST_RESORT: current_sensor_config.get(CONF_LAST_RESORT, False),
             CONF_APPLIANCE: current_sensor_config.get(CONF_APPLIANCE),
             CONF_DEVICE_COOLDOWN: current_sensor_config.get(CONF_DEVICE_COOLDOWN),
+            CONF_NOMINAL_POWER_WATT: current_sensor_config.get(
+                CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
+            ),
         }
 
         return self.async_show_form(
@@ -948,6 +955,9 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             CONF_LAST_RESORT: current_sensor_config.get(CONF_LAST_RESORT, False),
             CONF_APPLIANCE: current_sensor_config.get(CONF_APPLIANCE),
             CONF_DEVICE_COOLDOWN: current_sensor_config.get(CONF_DEVICE_COOLDOWN),
+            CONF_NOMINAL_POWER_WATT: current_sensor_config.get(
+                CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
+            ),
         }
 
         return self.async_show_form(
