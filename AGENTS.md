@@ -24,8 +24,28 @@ Runs ruff formatter and linter with automatic fixes.
 ```
 Starts a local Home Assistant instance with the integration loaded in the config directory.
 
-### Manual Testing
-No automated test suite exists. Testing is done via Home Assistant UI and manual verification.
+### Test
+```bash
+./scripts/test
+```
+Runs pytest against a real Home Assistant instance via
+pytest-homeassistant-custom-component. Set up the environment once with:
+```bash
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
+```
+
+The harness pins its own Home Assistant version, which trails the core this
+integration is deployed against, so the tests cover this integration's logic
+rather than its compatibility with a newer core. The harness also needs an
+older Python than the one the deployed core requires, hence the separate
+virtualenv.
+
+Durations (sustained dwell, cooldowns, shed age) are read through
+`clock.monotonic`, so the `clock` fixture can move time without touching the
+event loop's own clock. Feed the meter with `hold()` rather than repeating a
+value directly: Home Assistant drops a state write that repeats the previous
+value, so an unchanging feed produces no events at all and the balancer never
+re-evaluates.
 
 ## Code Style Guidelines
 

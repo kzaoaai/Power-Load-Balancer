@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+if [ ! -x .venv/bin/python ]; then
+  echo "No .venv found. Create one with a Python the harness supports:" >&2
+  echo "  python3.12 -m venv .venv" >&2
+  echo "  .venv/bin/pip install -r requirements_test.txt" >&2
+  exit 1
+fi
+
+.venv/bin/python -m pytest "$@"

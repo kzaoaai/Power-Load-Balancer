@@ -15,6 +15,29 @@ ignore = [
     "ISC001", # incompatible with formatter
 ]
 
+# Tests exercise the integration from the outside but must also assert on
+# internal state that has no public accessor, and they read as prose rather
+# than as library code.
+[lint.per-file-ignores]
+"tests/**" = [
+    "S101",    # assert is the point of a test
+    "SLF001",  # asserting on private state is often the only way to pin a bug
+    "PLR2004", # a load in watts is clearer inline than behind a constant
+    "D100",    # module docstrings are present where they earn their place
+    "D103",    # test names and their docstrings already say what they cover
+    "D104",
+    "D101",
+    "D102",
+    "D107",
+    "ANN001",  # fixtures are typed by their definitions
+    "ANN201",
+    "ANN202",
+    "INP001",
+    "PT019",
+    "ARG001",  # fixtures requested for their side effects
+    "TC003",
+]
+
 [lint.flake8-pytest-style]
 fixture-parentheses = false
 

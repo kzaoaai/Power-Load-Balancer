@@ -1,0 +1,7 @@
+# The test harness pins the Home Assistant version it ships against, so this
+# file deliberately does not track requirements.txt. 0.13.205 is the newest
+# release available and brings Home Assistant 2025.1.4; production currently
+# runs 2026.8.2, so these tests verify this integration's own logic rather
+# than its compatibility with the deployed core. Raise this pin whenever a
+# release tracking a newer core appears.
+pytest-homeassistant-custom-component==0.13.205

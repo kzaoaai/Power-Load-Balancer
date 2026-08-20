@@ -23,3 +23,5 @@ power_load_balancer.code-workspace
 config/configuration.yaml
 custom_components/hacs
 custom_components/climate_template
+.venv/
+
