@@ -92,7 +92,8 @@ async def test_nameplate_survives_the_options_flow(hass, world, setup_balancer):
 async def test_a_saved_nameplate_is_shown_when_editing_again(
     hass, world, setup_balancer
 ):
-    """A stored value must come back as the field's default, not blank.
+    """
+    A stored value must come back as the field's default, not blank.
 
     Otherwise the next edit of any other field silently clears it.
     """
@@ -177,7 +178,8 @@ async def test_zero_is_stored_as_unset(hass, world, setup_balancer):
     ["importance", "last_resort", "device_cooldown", "name", "nominal_power_watt"],
 )
 async def test_every_offered_field_is_stored(hass, world, setup_balancer, field):
-    """Guard the whole form, not just the field that caught this out.
+    """
+    Guard the whole form, not just the field that caught this out.
 
     The rebuild that dropped the nameplate would drop any future field the
     same way, so assert that everything the form offers survives a save.
