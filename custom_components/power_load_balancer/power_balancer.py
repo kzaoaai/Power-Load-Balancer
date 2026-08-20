@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 from .appliance_controller import ApplianceController
 from .balancing_engine import BalancingCallbacks, BalancingEngine
+from .clock import monotonic
 from .const import (
     CONF_APPLIANCE,
     CONF_COOLDOWN_SECONDS,
@@ -52,6 +53,7 @@ from .const import (
     ISSUE_TRANSLATION_KEY_DEVICE_NOT_CONTROLLABLE,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
+    SHED_VERIFY_GRACE_SECONDS,
     SUSTAINED_DISARM_GRACE_SECONDS,
     SUSTAINED_ESCALATION_DWELL_SECONDS,
     SUSTAINED_ESCALATION_WINDOW_SECONDS,
@@ -166,6 +168,7 @@ class PowerLoadBalancer:
         self._sustained_check_unsub = None
         self._reported_sustained_failure = False
         self._below_arm_since = None
+        self._unverified_sheds: set[str] = set()
         self._event_dispatcher = BalancerEventDispatcher(
             hass,
             config_data["entry_id"],
@@ -225,8 +228,35 @@ class PowerLoadBalancer:
 
         self._initialize_availability_tracking()
         self._initialize_controllability_tracking()
+        self._adopt_appliances_already_shed()
 
         _LOGGER.debug("PowerLoadBalancer setup complete.")
+
+    def _adopt_appliances_already_shed(self) -> None:
+        """
+        Take back ownership of appliances still reporting themselves shed.
+
+        Which appliances the balancer had shed is held in memory, but the shed
+        itself lives in the appliance and survives a restart or a reload of
+        this entry. Without this the two drift apart: the appliance stays
+        suppressed while the balancer no longer knows it can restore it, so
+        nothing ever releases it.
+        """
+        for sensor_config in self._monitored_sensors:
+            entity_id = sensor_config.get(CONF_APPLIANCE)
+            if not isinstance(entity_id, str):
+                continue
+            if not self._appliance_controller.is_appliance_shed(entity_id):
+                continue
+
+            self._appliance_controller.mark_appliance_balanced_off(
+                entity_id, "adopted at startup: appliance reports it is shed"
+            )
+            _LOGGER.info(
+                "Adopted %s: it reports itself shed, so the balancer will "
+                "restore it when there is headroom",
+                entity_id,
+            )
 
     @callback
     def async_start_listening(self) -> None:
@@ -529,6 +559,7 @@ class PowerLoadBalancer:
         self._last_sustained_shed_at = None
         self._reported_sustained_failure = False
         self._below_arm_since = None
+        self._unverified_sheds.clear()
         self._cancel_sustained_check()
 
     def _cancel_sustained_check(self) -> None:
@@ -762,6 +793,8 @@ class PowerLoadBalancer:
         if not self._enabled:
             return
 
+        self._verify_sheds_took_effect()
+
         current_total_power = self.get_total_house_power()
         is_over_budget = current_total_power > self._power_budget
         sustained_shed_due = self._update_sustained_state(current_total_power)
@@ -789,9 +822,9 @@ class PowerLoadBalancer:
                 )
             shed_initiated = self._balance_down()
             if shed_initiated and self._sustained_since is not None:
-                self._record_sustained_shed(self.hass.loop.time())
+                self._record_sustained_shed(monotonic())
         elif sustained_shed_due:
-            now = self.hass.loop.time()
+            now = monotonic()
             sustained_seconds = (
                 round(now - self._sustained_since)
                 if self._sustained_since is not None
@@ -854,9 +887,55 @@ class PowerLoadBalancer:
             and self._sustained_since is not None
             and self._sustained_check_unsub is None
         ):
-            now = self.hass.loop.time()
+            now = monotonic()
             remaining = self._current_dwell_seconds(now) - (now - self._sustained_since)
             self._schedule_sustained_check(remaining)
+
+    def _verify_sheds_took_effect(self) -> None:
+        """
+        Report appliances that were shed but are still drawing.
+
+        A service call can succeed while the appliance keeps running: an
+        integration may refuse the request, or a device may ignore it. The
+        balancer would then hold the appliance as shed and never offer that
+        rung of the ladder again, while the load it was supposed to free is
+        still there. The load reading itself is authoritative and self-heals,
+        so this surfaces the discrepancy rather than acting on it.
+        """
+        for entity_id in self._appliance_controller.get_balanced_off_appliances():
+            age = self._appliance_controller.get_balanced_off_age(entity_id)
+            if age is None or age < SHED_VERIFY_GRACE_SECONDS:
+                continue
+
+            state = self.hass.states.get(entity_id)
+            if state is None or not self._is_appliance_active_state(entity_id, state):
+                self._unverified_sheds.discard(entity_id)
+                continue
+
+            if entity_id in self._unverified_sheds:
+                continue
+
+            self._unverified_sheds.add(entity_id)
+            _LOGGER.warning(
+                "Shed of %s did not take effect: still reporting %s after %s s",
+                entity_id,
+                state.state,
+                round(age),
+            )
+            self._event_dispatcher.add_log_entry(
+                f"Shed of {entity_id} did not take effect: still {state.state} "
+                f"after {round(age)} s"
+            )
+
+    def _is_appliance_active_state(self, entity_id: str, state: Any) -> bool:
+        """Return True when an appliance state counts as drawing power."""
+        if self._appliance_controller.is_appliance_shed(entity_id):
+            return False
+        if entity_id.startswith(
+            tuple(f"{domain}." for domain in NON_BINARY_ACTIVE_STATE_DOMAINS)
+        ):
+            return state.state not in ("off", "unknown", "unavailable")
+        return state.state == "on"
 
     def _record_sustained_shed(self, now: float) -> None:
         """
@@ -924,7 +1003,7 @@ class PowerLoadBalancer:
             if self._sustained_since is None:
                 self._below_arm_since = None
                 return False
-            now = self.hass.loop.time()
+            now = monotonic()
             if self._below_arm_since is None:
                 self._below_arm_since = now
                 _LOGGER.debug(
@@ -948,7 +1027,7 @@ class PowerLoadBalancer:
                 )
             return False
 
-        now = self.hass.loop.time()
+        now = monotonic()
         if (
             self._below_arm_since is not None
             and now - self._below_arm_since >= SUSTAINED_DISARM_GRACE_SECONDS
@@ -980,7 +1059,7 @@ class PowerLoadBalancer:
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return runtime diagnostics data for troubleshooting."""
-        now = self.hass.loop.time()
+        now = monotonic()
         return {
             "entry_id": self.entry.entry_id,
             "power_budget_watt": self._power_budget,
@@ -1044,6 +1123,7 @@ class PowerLoadBalancer:
                 self._appliance_controller.is_appliance_balanced_off
             ),
             is_in_cooldown=self._appliance_controller.is_in_cooldown,
+            is_appliance_shed=self._appliance_controller.is_appliance_shed,
         )
 
         self._balancing_engine.balance_up(
@@ -1068,6 +1148,7 @@ class PowerLoadBalancer:
     def _balance_down(self, reason: str | None = None) -> bool:
         """Turn off appliances to bring power usage below budget."""
         return self._balancing_engine.balance_down(
+            self._appliance_controller.is_appliance_shed,
             self._get_sensor_power_for_appliance,
             self._power_monitor.reduce_estimated_power,
             self._appliance_controller.is_appliance_balanced_off,

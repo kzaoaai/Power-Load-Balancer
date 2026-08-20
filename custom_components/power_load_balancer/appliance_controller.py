@@ -12,8 +12,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import CONF_ENTITY_ID
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
+from .clock import monotonic
 from .const import (
     CONF_APPLIANCE,
     CONF_DEVICE_COOLDOWN,
@@ -21,6 +23,7 @@ from .const import (
     DOMAIN,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
+    SHED_AWARE_PLATFORMS,
 )
 from .context_logger import ContextLogger
 from .exceptions import (
@@ -143,9 +146,16 @@ class ApplianceController:
 
         """
         self._balanced_off_appliances[entity_id] = {
-            "timestamp": self.hass.loop.time(),
+            "timestamp": monotonic(),
             "reason": reason or "Turned off by Power Load Balancer",
         }
+
+    def get_balanced_off_age(self, entity_id: str) -> float | None:
+        """Return seconds since an appliance was marked balanced off."""
+        info = self._balanced_off_appliances.get(entity_id)
+        if info is None:
+            return None
+        return monotonic() - info.get("timestamp", 0)
 
     def remove_from_balanced_off(self, entity_id: str) -> None:
         """
@@ -220,6 +230,53 @@ class ApplianceController:
 
         """
         return entity_id.startswith("climate.")
+
+    def _get_shed_api(self, entity_id: str) -> dict[str, str] | None:
+        """
+        Return the managed-shed service contract for an entity, if any.
+
+        Some integrations expose dedicated shed/release services that suppress
+        an appliance without looking like a person operating it. Entity-level
+        calls such as set_operation_mode are indistinguishable from manual
+        control and can trip an integration's own manual-override handling, so
+        the dedicated services are preferred whenever both the entity's
+        platform and the running services support them.
+        """
+        platform = self._get_entity_platform(entity_id)
+        if platform is None:
+            return None
+
+        api = SHED_AWARE_PLATFORMS.get(platform)
+        if api is None:
+            return None
+
+        if not self.hass.services.has_service(api["domain"], api["shed"]):
+            return None
+
+        return api
+
+    def is_appliance_shed(self, entity_id: str) -> bool:
+        """
+        Return True when an appliance reports itself shed by the balancer.
+
+        An integration with a managed shed service suppresses the load without
+        changing the operation mode the user chose, so the entity keeps
+        reporting an active-looking state while drawing nothing. Treating that
+        state as "still running" would stop the balancer from ever releasing
+        it, so the platform's shed attribute is authoritative here.
+        """
+        api = SHED_AWARE_PLATFORMS.get(self._get_entity_platform(entity_id) or "")
+        attribute = (api or {}).get("shed_attribute")
+        if not attribute:
+            return False
+
+        state = self.hass.states.get(entity_id)
+        return bool(state and state.attributes.get(attribute))
+
+    def _get_entity_platform(self, entity_id: str) -> str | None:
+        """Return the integration platform that provides an entity."""
+        entry = er.async_get(self.hass).async_get(entity_id)
+        return entry.platform if entry else None
 
     def _is_water_heater_entity(self, entity_id: str) -> bool:
         """
@@ -408,6 +465,20 @@ class ApplianceController:
         """Prepare domain/service payload for turning on an appliance."""
         domain = entity_id.split(".", maxsplit=1)[0]
 
+        shed_api = self._get_shed_api(entity_id)
+        if shed_api is not None:
+            logger.debug(
+                "Releasing appliance through its managed release service",
+                entity_id=entity_id,
+                service=f"{shed_api['domain']}.{shed_api['release']}",
+                reason=reason,
+            )
+            return (
+                shed_api["domain"],
+                shed_api["release"],
+                {"entity_id": entity_id},
+            )
+
         if self._is_climate_entity(entity_id):
             previous_mode = self._resolve_hvac_restore_mode(entity_id, appliance_state)
             if previous_mode is None:
@@ -489,6 +560,8 @@ class ApplianceController:
             True if the appliance is active, False otherwise.
 
         """
+        if self.is_appliance_shed(entity_id):
+            return False
         if self._is_non_binary_active_state_entity(entity_id):
             return state not in ("off", "unknown", "unavailable")
         return state == "on"
@@ -505,7 +578,7 @@ class ApplianceController:
             True if the appliance is off, False otherwise.
 
         """
-        return state == "off"
+        return state == "off" or self.is_appliance_shed(_entity_id)
 
     def get_previous_hvac_mode(self, entity_id: str) -> str | None:
         """
@@ -583,7 +656,7 @@ class ApplianceController:
         off_info = self._balanced_off_appliances[entity_id]
         off_time = off_info.get("timestamp", 0)
         cooldown = self.get_cooldown_for_appliance(entity_id)
-        elapsed = self.hass.loop.time() - off_time
+        elapsed = monotonic() - off_time
 
         if elapsed < cooldown:
             _LOGGER.debug(
@@ -712,8 +785,9 @@ class ApplianceController:
                             f"Error: {type(exc).__name__}"
                         )
 
-            task = self.hass.async_create_task(
-                auto_turn_on_task(entity_id, cooldown_seconds)
+            task = self.hass.async_create_background_task(
+                auto_turn_on_task(entity_id, cooldown_seconds),
+                f"power_load_balancer auto turn-on {entity_id}",
             )
             self._scheduled_auto_turn_ons[entity_id] = task
 
@@ -729,23 +803,35 @@ class ApplianceController:
         logger: ContextLogger,
         reason: str,
         domain: str,
-    ) -> tuple[str, dict[str, str]]:
-        """Return the (service, service_data) pair that turns an appliance off."""
+    ) -> tuple[str, str, dict[str, str]]:
+        """Return the (domain, service, service_data) triple that sheds an appliance."""
+        shed_api = self._get_shed_api(entity_id)
+        if shed_api is not None:
+            logger.debug(
+                "Shedding appliance through its managed shed service",
+                entity_id=entity_id,
+                service=f"{shed_api['domain']}.{shed_api['shed']}",
+                reason=reason,
+            )
+            return (shed_api["domain"], shed_api["shed"], {"entity_id": entity_id})
+
         if self._is_climate_entity(entity_id):
-            return self._prepare_climate_turn_off(
+            service, service_data = self._prepare_climate_turn_off(
                 entity_id, appliance_state, logger, reason
             )
+            return (domain, service, service_data)
         if self._is_water_heater_entity(entity_id):
-            return self._prepare_water_heater_turn_off(
+            service, service_data = self._prepare_water_heater_turn_off(
                 entity_id, appliance_state, logger, reason
             )
+            return (domain, service, service_data)
         logger.debug(
             "Turning off appliance",
             entity_id=entity_id,
             reason=reason,
             domain=domain,
         )
-        return ("turn_off", {"entity_id": entity_id})
+        return (domain, "turn_off", {"entity_id": entity_id})
 
     def _keep_balanced_off_after_failure(
         self, entity_id: str, logger: ContextLogger
@@ -795,13 +881,13 @@ class ApplianceController:
                 return
 
             domain = entity_id.split(".", maxsplit=1)[0]
-            service, service_data = self._prepare_turn_off_service(
+            call_domain, service, service_data = self._prepare_turn_off_service(
                 entity_id, appliance_state, logger, reason, domain
             )
 
             params = ServiceCallParams(
                 hass=self.hass,
-                domain=domain,
+                domain=call_domain,
                 service=service,
                 service_data=service_data,
                 logger=logger,
@@ -912,13 +998,13 @@ class ApplianceController:
                 return
 
             domain = entity_id.split(".", maxsplit=1)[0]
-            service, service_data = self._prepare_turn_off_service(
+            call_domain, service, service_data = self._prepare_turn_off_service(
                 entity_id, appliance_state, logger, reason, domain
             )
 
             params = ServiceCallParams(
                 hass=self.hass,
-                domain=domain,
+                domain=call_domain,
                 service=service,
                 service_data=service_data,
                 logger=logger,

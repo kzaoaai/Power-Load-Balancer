@@ -18,6 +18,7 @@ from .const import (
     CONF_IMPORTANCE,
     CONF_LAST_RESORT,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
+    RESTORE_UNKNOWN_SIZE_FRACTION,
 )
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ class BalancingCallbacks:
     reduce_estimated_power: Callable[[float], None]
     is_appliance_balanced_off: Callable[[str], bool]
     is_in_cooldown: Callable[[str], bool]
+    is_appliance_shed: Callable[[str], bool]
 
 
 class BalancingEngine:
@@ -124,7 +126,11 @@ class BalancingEngine:
                 continue
 
             appliance_state = self.hass.states.get(appliance_entity_id)
-            if appliance_state and appliance_state.state != "off":
+            if (
+                appliance_state
+                and appliance_state.state != "off"
+                and not callbacks.is_appliance_shed(appliance_entity_id)
+            ):
                 continue
 
             current_power = callbacks.get_total_power()
@@ -147,7 +153,26 @@ class BalancingEngine:
                 expected_power,
             )
 
-            if available_budget >= expected_power > 0:
+            unknown_size = expected_power <= 0
+            if unknown_size:
+                # Nothing to size the restore against, so wait for a house
+                # quiet enough that almost anything fits.
+                fits = current_power < self._effective_budget * (
+                    RESTORE_UNKNOWN_SIZE_FRACTION
+                )
+                if fits:
+                    _LOGGER.debug(
+                        "Restoring %s on headroom alone: its draw is unknown "
+                        "and the load is %s W, below %s%% of the effective "
+                        "budget",
+                        appliance_entity_id,
+                        current_power,
+                        int(RESTORE_UNKNOWN_SIZE_FRACTION * 100),
+                    )
+            else:
+                fits = available_budget >= expected_power
+
+            if fits:
                 _LOGGER.info(
                     "Restoring %s: sufficient power headroom "
                     "(%s W available, %s W needed)",
@@ -177,8 +202,9 @@ class BalancingEngine:
         _LOGGER.debug("No appliances eligible for restoration")
 
     @callback
-    def balance_down(
+    def balance_down(  # noqa: PLR0913  (one callback per collaborator, by design)
         self,
+        is_appliance_shed_callback: Any,
         get_sensor_power_for_appliance_callback: Any,
         reduce_estimated_power_callback: Any,
         is_appliance_balanced_off_callback: Any,
@@ -189,6 +215,8 @@ class BalancingEngine:
         Turn off appliances to bring power usage below budget.
 
         Args:
+            is_appliance_shed_callback: Callback reporting whether an
+                appliance already reports itself shed.
             get_sensor_power_for_appliance_callback: Callback to get sensor
                 power for appliance.
             reduce_estimated_power_callback: Callback to reduce estimated power.
@@ -226,6 +254,7 @@ class BalancingEngine:
 
             if (
                 appliance_state
+                and not is_appliance_shed_callback(appliance_entity_id)
                 and self._is_appliance_active(
                     appliance_entity_id, appliance_state.state
                 )

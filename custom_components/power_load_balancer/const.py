@@ -29,6 +29,13 @@ DEFAULT_SUSTAINED_DURATION_SECONDS = 60
 SUSTAINED_ESCALATION_WINDOW_SECONDS = 180
 SUSTAINED_ESCALATION_DWELL_SECONDS = 15
 SUSTAINED_DISARM_GRACE_SECONDS = 15
+SHED_VERIFY_GRACE_SECONDS = 45
+
+# An appliance adopted at startup was shed before this process began, so its
+# power sensor reads zero and there is no way to size what restoring it costs.
+# Restoring it only in a demonstrably quiet house bounds that uncertainty
+# without leaving it suppressed forever.
+RESTORE_UNKNOWN_SIZE_FRACTION = 0.5
 
 CONF_NOTIFY_PERSISTENT = "notify_persistent"
 CONF_NOTIFY_SERVICE = "notify_service"
@@ -37,6 +44,15 @@ DEFAULT_NOTIFY_PERSISTENT = False
 DEFAULT_NOTIFY_SERVICE = ""
 
 EVENT_POWER_LOAD_BALANCER = "power_load_balancer_event"
+
+SHED_AWARE_PLATFORMS: dict[str, dict[str, str]] = {
+    "generic_water_heater": {
+        "domain": "generic_water_heater",
+        "shed": "shed",
+        "release": "release",
+        "shed_attribute": "load_shed",
+    },
+}
 
 SUPPORTED_APPLIANCE_DOMAINS = (
     "switch",
