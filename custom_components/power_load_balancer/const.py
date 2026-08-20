@@ -51,6 +51,7 @@ SHED_AWARE_PLATFORMS: dict[str, dict[str, str]] = {
         "shed": "shed",
         "release": "release",
         "shed_attribute": "load_shed",
+        "nominal_power_attribute": "nominal_power_w",
     },
 }
 

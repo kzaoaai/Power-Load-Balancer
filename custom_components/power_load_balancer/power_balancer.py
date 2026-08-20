@@ -726,17 +726,8 @@ class PowerLoadBalancer:
             new_state.state,
         )
 
-        is_non_binary_active_state_entity = entity_id.startswith(
-            tuple(f"{domain}." for domain in NON_BINARY_ACTIVE_STATE_DOMAINS)
-        )
-        old_state_value = old_state.state if old_state else None
-
-        if is_non_binary_active_state_entity:
-            is_now_active = new_state.state not in ("off", "unknown", "unavailable")
-            was_active = old_state_value not in ("off", "unknown", "unavailable", None)
-        else:
-            is_now_active = new_state.state == "on"
-            was_active = old_state_value == "on"
+        is_now_active = self._state_is_drawing(entity_id, new_state)
+        was_active = self._state_is_drawing(entity_id, old_state)
 
         if is_now_active and not was_active:
             await self._handle_appliance_turn_on(entity_id)
@@ -755,7 +746,9 @@ class PowerLoadBalancer:
 
         for sensor_config in self._monitored_sensors:
             if sensor_config.get(CONF_APPLIANCE) == entity_id:
-                power_to_add = self._power_monitor.calculate_sensor_power(sensor_config)
+                power_to_add = self._power_monitor.calculate_sensor_power(
+                    sensor_config
+                ) or self._appliance_controller.get_nominal_power(entity_id)
 
                 if self._power_monitor.would_exceed_budget(power_to_add):
                     await self._appliance_controller.turn_off_appliance(
@@ -908,7 +901,7 @@ class PowerLoadBalancer:
                 continue
 
             state = self.hass.states.get(entity_id)
-            if state is None or not self._is_appliance_active_state(entity_id, state):
+            if not self._state_is_drawing(entity_id, state):
                 self._unverified_sheds.discard(entity_id)
                 continue
 
@@ -927,9 +920,18 @@ class PowerLoadBalancer:
                 f"after {round(age)} s"
             )
 
-    def _is_appliance_active_state(self, entity_id: str, state: Any) -> bool:
-        """Return True when an appliance state counts as drawing power."""
-        if self._appliance_controller.is_appliance_shed(entity_id):
+    def _state_is_drawing(self, entity_id: str, state: Any) -> bool:
+        """
+        Return True when a state snapshot means the appliance is drawing.
+
+        An appliance suppressed through a managed shed keeps reporting the
+        operation mode its owner chose, so the reported mode alone cannot
+        separate running from shed -- and a shed being cleared by hand would
+        otherwise look like no change at all.
+        """
+        if state is None:
+            return False
+        if self._appliance_controller.state_reports_shed(entity_id, state):
             return False
         if entity_id.startswith(
             tuple(f"{domain}." for domain in NON_BINARY_ACTIVE_STATE_DOMAINS)
@@ -1202,8 +1204,10 @@ class PowerLoadBalancer:
             appliance_entity_id
         )
         if sensor_id:
-            return self._power_monitor.get_sensor_power(sensor_id)
-        return 0.0
+            measured = self._power_monitor.get_sensor_power(sensor_id)
+            if measured > 0:
+                return measured
+        return self._appliance_controller.get_nominal_power(appliance_entity_id)
 
     def manages_entity(self, entity_id: str) -> bool:
         """Check if this PowerLoadBalancer instance manages the given entity."""

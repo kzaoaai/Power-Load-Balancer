@@ -265,13 +265,47 @@ class ApplianceController:
         state as "still running" would stop the balancer from ever releasing
         it, so the platform's shed attribute is authoritative here.
         """
+        return self.state_reports_shed(entity_id, self.hass.states.get(entity_id))
+
+    def state_reports_shed(self, entity_id: str, state: State | None) -> bool:
+        """
+        Return True when a given state snapshot reports the appliance shed.
+
+        Taking the snapshot rather than reading the entity lets callers judge
+        the state an appliance is moving away from as well as the one it is
+        moving to, which is the only way to notice a shed being cleared: the
+        reported mode is identical on both sides of that change.
+        """
+        if state is None:
+            return False
+
         api = SHED_AWARE_PLATFORMS.get(self._get_entity_platform(entity_id) or "")
         attribute = (api or {}).get("shed_attribute")
         if not attribute:
             return False
 
+        return bool(state.attributes.get(attribute))
+
+    def get_nominal_power(self, entity_id: str) -> float:
+        """
+        Return an appliance's own declared draw, or 0 when it declares none.
+
+        A shed appliance draws nothing, and its power sensor may lag by a
+        minute besides, so neither can size what letting it run would cost.
+        An integration that publishes a nominal rating answers immediately.
+        """
+        api = SHED_AWARE_PLATFORMS.get(self._get_entity_platform(entity_id) or "")
+        attribute = (api or {}).get("nominal_power_attribute")
+        if not attribute:
+            return 0.0
+
         state = self.hass.states.get(entity_id)
-        return bool(state and state.attributes.get(attribute))
+        if state is None:
+            return 0.0
+        try:
+            return max(float(state.attributes.get(attribute) or 0), 0.0)
+        except (TypeError, ValueError):
+            return 0.0
 
     def _get_entity_platform(self, entity_id: str) -> str | None:
         """Return the integration platform that provides an entity."""
