@@ -15,6 +15,7 @@ event loop and the state machine behave as they do in production.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -95,8 +96,14 @@ class Clock:
     def __init__(self, hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
         self._hass = hass
         self._now = 10_000.0
+        self._wall = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
         for module in (power_balancer, appliance_controller):
             monkeypatch.setattr(module, "monotonic", lambda: self._now)
+        # Wall clock must move with the monotonic one. Due times are reported
+        # as wall-clock instants derived from a monotonic remainder, so
+        # freezing one while advancing the other invents a drift that cannot
+        # happen in production and would fail an otherwise sound assertion.
+        monkeypatch.setattr("homeassistant.util.dt.utcnow", lambda: self._wall)
 
     @property
     def now(self) -> float:
@@ -105,6 +112,7 @@ class Clock:
     async def advance(self, seconds: float) -> None:
         """Move time forward and let anything waiting on it run."""
         self._now += seconds
+        self._wall += timedelta(seconds=seconds)
         await self._hass.async_block_till_done()
 
 

@@ -19,6 +19,11 @@
       "power_budget": {
         "name": "Power Budget"
       }
+    },
+    "sensor": {
+      "pending_actions": {
+        "name": "Pending Actions"
+      }
     }
   },
   "services": {

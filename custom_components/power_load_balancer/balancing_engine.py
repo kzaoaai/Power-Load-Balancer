@@ -22,7 +22,7 @@ from .const import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from homeassistant.core import HomeAssistant
 
@@ -201,6 +201,51 @@ class BalancingEngine:
 
         _LOGGER.debug("No appliances eligible for restoration")
 
+    def shed_candidates(
+        self,
+        is_appliance_shed_callback: Any,
+        is_appliance_balanced_off_callback: Any,
+    ) -> Iterator[dict[str, Any]]:
+        """
+        Yield the appliances that could be shed, least important first.
+
+        Shared with the pending-action report so what the balancer says it is
+        about to do and what it would actually do cannot drift apart.
+        """
+        sensors_to_consider = sorted(
+            self._monitored_sensors, key=lambda x: x.get(CONF_IMPORTANCE, 5)
+        )
+        for sensor_config in sensors_to_consider:
+            appliance_entity_id = sensor_config.get(CONF_APPLIANCE)
+            if not appliance_entity_id:
+                continue
+            if sensor_config.get(CONF_LAST_RESORT, False):
+                continue
+            appliance_state = self.hass.states.get(appliance_entity_id)
+            if appliance_state is None:
+                continue
+            if is_appliance_shed_callback(appliance_entity_id):
+                continue
+            if not self._is_appliance_active(
+                appliance_entity_id, appliance_state.state
+            ):
+                continue
+            if is_appliance_balanced_off_callback(appliance_entity_id):
+                continue
+            yield sensor_config
+
+    def next_shed_candidate(
+        self,
+        is_appliance_shed_callback: Any,
+        is_appliance_balanced_off_callback: Any,
+    ) -> str | None:
+        """Return the appliance that would be shed next, if any."""
+        for sensor_config in self.shed_candidates(
+            is_appliance_shed_callback, is_appliance_balanced_off_callback
+        ):
+            return str(sensor_config[CONF_APPLIANCE])
+        return None
+
     @callback
     def balance_down(  # noqa: PLR0913  (one callback per collaborator, by design)
         self,
@@ -234,94 +279,70 @@ class BalancingEngine:
         shed_reason = reason or (
             f"Automatic balancing: Exceeded budget of {self._power_budget} W"
         )
-        sensors_to_consider = sorted(
-            self._monitored_sensors, key=lambda x: x.get(CONF_IMPORTANCE, 5)
-        )
 
-        _LOGGER.debug(
-            "Appliances considered for balancing (sorted by importance): %s",
-            [s.get(CONF_APPLIANCE) for s in sensors_to_consider],
-        )
+        for sensor_config in self.shed_candidates(
+            is_appliance_shed_callback, is_appliance_balanced_off_callback
+        ):
+            appliance_entity_id = sensor_config[CONF_APPLIANCE]
+            expected_power_reduction = get_sensor_power_for_appliance_callback(
+                appliance_entity_id
+            )
 
-        for sensor_config in sensors_to_consider:
-            appliance_entity_id = sensor_config.get(CONF_APPLIANCE)
-            is_last_resort = sensor_config.get(CONF_LAST_RESORT, False)
+            _LOGGER.info(
+                "Turning off %s (importance %s) to balance power. "
+                "Expected power reduction: %s W",
+                appliance_entity_id,
+                sensor_config.get(CONF_IMPORTANCE),
+                expected_power_reduction,
+            )
 
-            if not appliance_entity_id:
-                continue
-
-            appliance_state = self.hass.states.get(appliance_entity_id)
-
-            if (
-                appliance_state
-                and not is_appliance_shed_callback(appliance_entity_id)
-                and self._is_appliance_active(
-                    appliance_entity_id, appliance_state.state
-                )
-                and not is_appliance_balanced_off_callback(appliance_entity_id)
-                and not is_last_resort
-            ):
-                expected_power_reduction = get_sensor_power_for_appliance_callback(
-                    appliance_entity_id
-                )
-
-                _LOGGER.info(
-                    "Turning off %s (importance %s) to balance power. "
-                    "Expected power reduction: %s W",
+            optimistic_reduction = 0.0
+            if expected_power_reduction > 0:
+                optimistic_reduction = expected_power_reduction
+                reduce_estimated_power_callback(optimistic_reduction)
+                _LOGGER.debug(
+                    "Optimistically reduced estimated power by %s W for %s",
+                    optimistic_reduction,
                     appliance_entity_id,
-                    sensor_config.get(CONF_IMPORTANCE),
-                    expected_power_reduction,
                 )
 
-                optimistic_reduction = 0.0
-                if expected_power_reduction > 0:
-                    optimistic_reduction = expected_power_reduction
-                    reduce_estimated_power_callback(optimistic_reduction)
-                    _LOGGER.debug(
-                        "Optimistically reduced estimated power by %s W for %s",
-                        optimistic_reduction,
-                        appliance_entity_id,
+            async def turn_off_task(
+                inner_appliance_id: str, reduced_power: float
+            ) -> None:
+                try:
+                    appliance_state_before = self.hass.states.get(inner_appliance_id)
+                    if appliance_state_before and not self._is_appliance_active(
+                        inner_appliance_id, appliance_state_before.state
+                    ):
+                        _LOGGER.debug(
+                            "Skipping turn_off: appliance %s already in %s",
+                            inner_appliance_id,
+                            appliance_state_before.state,
+                        )
+                        return
+
+                    await turn_off_appliance_callback(
+                        inner_appliance_id,
+                        shed_reason,
+                    )
+                except Exception:
+                    if reduced_power > 0:
+                        reduce_estimated_power_callback(-reduced_power)
+                        _LOGGER.debug(
+                            "Restored estimated power by %s W for %s after "
+                            "turn-off failure",
+                            reduced_power,
+                            inner_appliance_id,
+                        )
+                    _LOGGER.exception(
+                        "Failed to turn off appliance %s", inner_appliance_id
                     )
 
-                async def turn_off_task(
-                    inner_appliance_id: str, reduced_power: float
-                ) -> None:
-                    try:
-                        appliance_state_before = self.hass.states.get(
-                            inner_appliance_id
-                        )
-                        if appliance_state_before and not self._is_appliance_active(
-                            inner_appliance_id, appliance_state_before.state
-                        ):
-                            _LOGGER.debug(
-                                "Skipping turn_off: appliance %s already in %s",
-                                inner_appliance_id,
-                                appliance_state_before.state,
-                            )
-                            return
-
-                        await turn_off_appliance_callback(
-                            inner_appliance_id,
-                            shed_reason,
-                        )
-                    except Exception:
-                        if reduced_power > 0:
-                            reduce_estimated_power_callback(-reduced_power)
-                            _LOGGER.debug(
-                                "Restored estimated power by %s W for %s after "
-                                "turn-off failure",
-                                reduced_power,
-                                inner_appliance_id,
-                            )
-                        _LOGGER.exception(
-                            "Failed to turn off appliance %s", inner_appliance_id
-                        )
-
-                self.hass.async_create_task(
-                    turn_off_task(appliance_entity_id, optimistic_reduction)
-                )
-                self._reported_balance_down_failure = False
-                return True
+            self.hass.async_create_task(
+                turn_off_task(appliance_entity_id, optimistic_reduction)
+            )
+            self._reported_balance_down_failure = False
+            return True
 
         if self._reported_balance_down_failure:
             _LOGGER.debug(

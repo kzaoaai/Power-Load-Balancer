@@ -19,6 +19,11 @@
       "power_budget": {
         "name": "Budget di potenza"
       }
+    },
+    "sensor": {
+      "pending_actions": {
+        "name": "Azioni in sospeso"
+      }
     }
   },
   "services": {

@@ -8,6 +8,7 @@ appliance control, and automatic load balancing based on a configured power budg
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
@@ -169,6 +170,7 @@ class PowerLoadBalancer:
         self._reported_sustained_failure = False
         self._below_arm_since = None
         self._unverified_sheds: set[str] = set()
+        self._pending_sensor: Any = None
         self._event_dispatcher = BalancerEventDispatcher(
             hass,
             config_data["entry_id"],
@@ -526,6 +528,7 @@ class PowerLoadBalancer:
             self._availability_events.clear()
             self._non_controllable_media_players.clear()
             self._event_log_sensor = None
+            self._pending_sensor = None
 
             logger.info("PowerLoadBalancer cleanup completed successfully")
 
@@ -551,6 +554,8 @@ class PowerLoadBalancer:
         """Set the enabled state of the balancer."""
         self._enabled = enabled
         self._reset_sustained_tracking()
+        self._unverified_sheds.clear()
+        self._refresh_pending_sensor()
         _LOGGER.info("Power Load Balancer %s", "enabled" if enabled else "disabled")
 
     def _reset_sustained_tracking(self) -> None:
@@ -559,7 +564,6 @@ class PowerLoadBalancer:
         self._last_sustained_shed_at = None
         self._reported_sustained_failure = False
         self._below_arm_since = None
-        self._unverified_sheds.clear()
         self._cancel_sustained_check()
 
     def _cancel_sustained_check(self) -> None:
@@ -649,6 +653,7 @@ class PowerLoadBalancer:
         """Disable balancing and restore all balanced-off appliances."""
         self._enabled = False
         self._reset_sustained_tracking()
+        self._refresh_pending_sensor()
         _LOGGER.info(
             "Power Load Balancer disabled, restoring all balanced-off appliances"
         )
@@ -676,6 +681,10 @@ class PowerLoadBalancer:
         """
         self._event_log_sensor = sensor
         self._event_dispatcher.set_sensor(sensor)
+
+    def register_pending_sensor(self, sensor: Any) -> None:
+        """Register the sensor that reports queued actions."""
+        self._pending_sensor = sensor
 
     async def _handle_power_sensor_state_change(self, event: Any) -> None:
         """
@@ -784,6 +793,7 @@ class PowerLoadBalancer:
     def async_check_and_balance(self) -> None:
         """Check power usage and perform balancing if necessary."""
         if not self._enabled:
+            self._refresh_pending_sensor()
             return
 
         self._verify_sheds_took_effect()
@@ -874,6 +884,7 @@ class PowerLoadBalancer:
             self._balance_up()
 
         self._was_over_budget = is_over_budget
+        self._refresh_pending_sensor()
 
         if (
             self._sustained_enabled
@@ -883,6 +894,11 @@ class PowerLoadBalancer:
             now = monotonic()
             remaining = self._current_dwell_seconds(now) - (now - self._sustained_since)
             self._schedule_sustained_check(remaining)
+
+    def _refresh_pending_sensor(self) -> None:
+        """Let the pending-actions sensor recompute, if it exists yet."""
+        if self._pending_sensor is not None:
+            self._pending_sensor.refresh()
 
     def _verify_sheds_took_effect(self) -> None:
         """
@@ -895,7 +911,10 @@ class PowerLoadBalancer:
         still there. The load reading itself is authoritative and self-heals,
         so this surfaces the discrepancy rather than acting on it.
         """
-        for entity_id in self._appliance_controller.get_balanced_off_appliances():
+        held = set(self._appliance_controller.get_balanced_off_appliances())
+        self._unverified_sheds &= held
+
+        for entity_id in held:
             age = self._appliance_controller.get_balanced_off_age(entity_id)
             if age is None or age < SHED_VERIFY_GRACE_SECONDS:
                 continue
@@ -1058,6 +1077,140 @@ class PowerLoadBalancer:
                 self._schedule_sustained_check(dwell_seconds - elapsed)
             return False
         return True
+
+    def get_pending_actions(self) -> dict[str, Any]:
+        """
+        Describe what the balancer is currently waiting to do.
+
+        Times are reported as the moment an action becomes due rather than as
+        a countdown. A countdown would change on every evaluation, and Home
+        Assistant records a new row whenever a state or any attribute changes,
+        so a ticking value would write history every few seconds for the whole
+        wait. A due time is stable until the plan itself changes.
+        """
+        if not self._enabled:
+            return {
+                "count": 0,
+                "summary": "Balancer disabled",
+                "next_due_at": None,
+                "pending": [],
+            }
+
+        pending: list[dict[str, Any]] = []
+        now = monotonic()
+
+        if self._sustained_since is not None:
+            remaining = self._current_dwell_seconds(now) - (now - self._sustained_since)
+            candidate = self._balancing_engine.next_shed_candidate(
+                self._appliance_controller.is_appliance_shed,
+                self._appliance_controller.is_appliance_balanced_off,
+            )
+            if candidate is None:
+                pending.append(
+                    {
+                        "action": "attention",
+                        "entity_id": None,
+                        "due_at": None,
+                        "reason": (
+                            f"load at or above the effective budget of "
+                            f"{round(self.effective_budget)} W and nothing "
+                            f"is available to shed"
+                        ),
+                    }
+                )
+            else:
+                pending.append(
+                    {
+                        "action": "shed",
+                        "entity_id": candidate,
+                        "due_at": self._due_at(remaining),
+                        "reason": (
+                            f"load at or above the effective budget of "
+                            f"{round(self.effective_budget)} W"
+                        ),
+                    }
+                )
+
+        for entity_id in self._appliance_controller.get_balanced_off_appliances():
+            if entity_id in self._unverified_sheds:
+                pending.append(
+                    {
+                        "action": "attention",
+                        "entity_id": entity_id,
+                        "due_at": None,
+                        "reason": "shed did not take effect; still drawing",
+                    }
+                )
+                continue
+
+            age = self._appliance_controller.get_balanced_off_age(entity_id)
+            cooldown = self._appliance_controller.get_cooldown_for_appliance(entity_id)
+            remaining = cooldown - age if age is not None else cooldown
+            pending.append(
+                {
+                    "action": "restore",
+                    "entity_id": entity_id,
+                    "due_at": self._due_at(remaining) if remaining > 0 else None,
+                    "reason": (
+                        "waiting out the cooldown"
+                        if remaining > 0
+                        else "waiting for enough headroom to restore"
+                    ),
+                }
+            )
+
+        due_times = [item["due_at"] for item in pending if item["due_at"]]
+        return {
+            "count": len(pending),
+            "summary": self._describe_pending(pending),
+            "next_due_at": min(due_times) if due_times else None,
+            "pending": pending,
+        }
+
+    def _due_at(self, remaining_seconds: float) -> str | None:
+        """
+        Return when something becomes due, to the nearest second.
+
+        The instant is rounded, never the offset. Rounding the offset and
+        truncating the clock quantises the same moment twice, and the two
+        quantisations drift against each other as the sub-second phase moves,
+        so a deadline that has not changed reports as two alternating
+        seconds -- rewriting the entity, and a recorder row, on almost every
+        evaluation. That is exactly what reporting an absolute time is meant
+        to avoid.
+        """
+        if remaining_seconds <= 0:
+            return None
+        due = dt.utcnow() + timedelta(seconds=remaining_seconds)
+        rounded = (due + timedelta(microseconds=500000)).replace(microsecond=0)
+        return rounded.isoformat()
+
+    def _describe_pending(self, pending: list[dict[str, Any]]) -> str:
+        """Summarise pending work without naming times, so it stays stable."""
+        if not pending:
+            return "Nothing pending"
+
+        parts: list[str] = []
+        for action, label in (
+            ("shed", "to shed"),
+            ("restore", "to restore"),
+            ("attention", "needing attention"),
+        ):
+            names = [
+                str(item["entity_id"]).split(".", 1)[-1]
+                for item in pending
+                if item["action"] == action and item["entity_id"]
+            ]
+            unnamed = sum(
+                1
+                for item in pending
+                if item["action"] == action and not item["entity_id"]
+            )
+            if names:
+                parts.append(f"{label} {', '.join(names)}")
+            elif unnamed:
+                parts.append(f"{label} an appliance")
+        return "Waiting " + "; ".join(parts) if parts else "Nothing pending"
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return runtime diagnostics data for troubleshooting."""

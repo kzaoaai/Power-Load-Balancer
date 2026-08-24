@@ -44,8 +44,77 @@ async def async_setup_entry(
 
     power_balancer: PowerLoadBalancer = hass.data[DOMAIN][config_entry.entry_id]
 
-    sensor = PowerBalancerLogSensor(power_balancer)
-    async_add_entities([sensor])
+    async_add_entities(
+        [
+            PowerBalancerLogSensor(power_balancer),
+            PowerBalancerPendingSensor(power_balancer),
+        ]
+    )
+
+
+class PowerBalancerPendingSensor(SensorEntity):
+    """
+    Reports what the balancer is waiting to do, and when.
+
+    The event log says what already happened; this says what is queued. It
+    answers the question a dashboard actually gets asked during an overload:
+    is anything about to switch, and which appliance.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "pending_actions"
+    _attr_icon = "mdi:timer-sand"
+    _attr_native_unit_of_measurement = "actions"
+
+    def __init__(self, balancer: PowerLoadBalancer) -> None:
+        """Initialize the pending-actions sensor."""
+        self._balancer = balancer
+        self._attr_unique_id = f"{balancer.entry.entry_id}_pending_actions"
+        self._report: dict[str, Any] = {
+            "count": 0,
+            "summary": "Nothing pending",
+            "next_due_at": None,
+            "pending": [],
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Register with the balancer and take a first reading."""
+        await super().async_added_to_hass()
+        self._balancer.register_pending_sensor(self)
+        self.refresh()
+
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Return device information for the sensor."""
+        if self._balancer.entry.entry_id:
+            return DeviceInfo(
+                identifiers={(DOMAIN, self._balancer.entry.entry_id)},
+                name="Power Load Balancer",
+                manufacturer=DEVICE_MANUFACTURER,
+                model=DEVICE_MODEL,
+            )
+        return None
+
+    @property
+    def native_value(self) -> StateType:
+        """Return how many actions are waiting."""
+        return self._report["count"]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the queued actions and when each becomes due."""
+        return {
+            "summary": self._report["summary"],
+            "next_due_at": self._report["next_due_at"],
+            "pending": self._report["pending"],
+        }
+
+    @callback
+    def refresh(self) -> None:
+        """Recompute the report and publish it if anything changed."""
+        self._report = self._balancer.get_pending_actions()
+        if self.hass is not None:
+            self.async_write_ha_state()
 
 
 class PowerBalancerLogSensor(SensorEntity, RestoreEntity):
