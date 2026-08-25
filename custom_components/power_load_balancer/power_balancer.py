@@ -35,6 +35,7 @@ from .const import (
     CONF_APPLIANCE,
     CONF_COOLDOWN_SECONDS,
     CONF_MAIN_POWER_SENSOR,
+    CONF_NOTIFY_CATEGORIES,
     CONF_NOTIFY_PERSISTENT,
     CONF_NOTIFY_SERVICE,
     CONF_POWER_BUDGET_WATT,
@@ -43,6 +44,7 @@ from .const import (
     CONF_SUSTAINED_ENABLED,
     CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_NOTIFY_CATEGORIES,
     DEFAULT_NOTIFY_PERSISTENT,
     DEFAULT_NOTIFY_SERVICE,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
@@ -54,6 +56,8 @@ from .const import (
     ISSUE_TRANSLATION_KEY_DEVICE_NOT_CONTROLLABLE,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
+    NOTIFY_BUDGET,
+    NOTIFY_PROBLEM,
     SHED_VERIFY_GRACE_SECONDS,
     SUSTAINED_DISARM_GRACE_SECONDS,
     SUSTAINED_ESCALATION_DWELL_SECONDS,
@@ -179,6 +183,9 @@ class PowerLoadBalancer:
             ),
             notify_service=str(
                 config_data.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
+            ),
+            categories=config_data.get(
+                CONF_NOTIFY_CATEGORIES, DEFAULT_NOTIFY_CATEGORIES
             ),
         )
 
@@ -636,7 +643,8 @@ class PowerLoadBalancer:
         )
         self._event_dispatcher.add_log_entry(
             f"Power budget changed from {old_budget} W to {budget} W "
-            f"(effective {round(self.effective_budget)} W)"
+            f"(effective {round(self.effective_budget)} W)",
+            category=NOTIFY_BUDGET,
         )
 
     @property
@@ -864,7 +872,8 @@ class PowerLoadBalancer:
                         f"Unable to shed: {round(current_total_power)} W at or "
                         f"above the effective budget of "
                         f"{round(self.effective_budget)} W with no appliance "
-                        f"available"
+                        f"available",
+                        category=NOTIFY_PROBLEM,
                     )
                     self._reported_sustained_failure = True
                 self._sustained_since = now
@@ -936,7 +945,8 @@ class PowerLoadBalancer:
             )
             self._event_dispatcher.add_log_entry(
                 f"Shed of {entity_id} did not take effect: still {state.state} "
-                f"after {round(age)} s"
+                f"after {round(age)} s",
+                category=NOTIFY_PROBLEM,
             )
 
     def _state_is_drawing(self, entity_id: str, state: Any) -> bool:

@@ -15,7 +15,12 @@ from homeassistant.components import persistent_notification
 from homeassistant.core import callback
 from homeassistant.exceptions import ServiceNotFound
 
-from .const import DOMAIN, EVENT_POWER_LOAD_BALANCER
+from .const import (
+    DEFAULT_NOTIFY_CATEGORIES,
+    DOMAIN,
+    EVENT_POWER_LOAD_BALANCER,
+    NOTIFY_PROBLEM,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -44,6 +49,7 @@ class BalancerEventDispatcher:
         *,
         notify_persistent: bool,
         notify_service: str,
+        categories: list[str] | None = None,
     ) -> None:
         """
         Initialize the dispatcher.
@@ -56,12 +62,17 @@ class BalancerEventDispatcher:
                 for each event.
             notify_service: Service name under the notify domain to send
                 events to, or an empty string to disable.
+            categories: Which kinds of event are worth a notification. The
+                event log and the bus event always receive everything.
 
         """
         self.hass = hass
         self._entry_id = entry_id
         self._notify_persistent = notify_persistent
         self._notify_service = notify_service
+        self._categories = set(
+            DEFAULT_NOTIFY_CATEGORIES if categories is None else categories
+        )
         self._sensor: Any = None
         self._notify_failure_logged = False
 
@@ -70,9 +81,14 @@ class BalancerEventDispatcher:
         self._sensor = sensor
 
     @callback
-    def add_log_entry(self, message: str) -> None:
+    def add_log_entry(self, message: str, category: str = NOTIFY_PROBLEM) -> None:
         """
         Record one balancer event and fan it out to all consumers.
+
+        The event log and the bus event always receive everything: they are
+        the record, and a record with holes in it is worse than none at all
+        when working out afterwards what the balancer did. The category only
+        decides whether the event is worth interrupting someone for.
 
         Keeps the add_log_entry name so existing callers can treat the
         dispatcher exactly like the event-log sensor it wraps.
@@ -82,8 +98,15 @@ class BalancerEventDispatcher:
 
         self.hass.bus.async_fire(
             EVENT_POWER_LOAD_BALANCER,
-            {"entry_id": self._entry_id, "message": message},
+            {
+                "entry_id": self._entry_id,
+                "message": message,
+                "category": category,
+            },
         )
+
+        if category not in self._categories:
+            return
 
         if self._notify_persistent:
             try:
@@ -147,5 +170,6 @@ class BalancerEventDispatcher:
         return {
             "notify_persistent": self._notify_persistent,
             "notify_service": self._notify_service or None,
+            "notify_categories": sorted(self._categories),
             "sensor_registered": self._sensor is not None,
         }

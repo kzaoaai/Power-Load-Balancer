@@ -25,6 +25,9 @@ from .const import (
     DOMAIN,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
+    NOTIFY_PROBLEM,
+    NOTIFY_RESTORE,
+    NOTIFY_SHED,
     SHED_AWARE_PLATFORMS,
 )
 from .context_logger import ContextLogger
@@ -533,7 +536,8 @@ class ApplianceController:
                 if self._event_log_sensor:
                     self._event_log_sensor.add_log_entry(
                         f"Service call skipped: Cannot restore {entity_id}. "
-                        "No valid HVAC mode available"
+                        "No valid HVAC mode available",
+                        category=NOTIFY_PROBLEM,
                     )
                 return None
 
@@ -823,7 +827,8 @@ class ApplianceController:
                     if self._event_log_sensor:
                         self._event_log_sensor.add_log_entry(
                             f"Auto turn-on failed for {entity_to_restore}. "
-                            f"Error: {type(exc).__name__}"
+                            f"Error: {type(exc).__name__}",
+                            category=NOTIFY_PROBLEM,
                         )
 
             task = self.hass.async_create_background_task(
@@ -948,7 +953,8 @@ class ApplianceController:
 
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
-                    f"Turned off {entity_id}. Reason: {reason}"
+                    f"Turned off {entity_id}. Reason: {reason}",
+                    category=NOTIFY_SHED,
                 )
 
         except (EntityNotFoundError, EntityUnavailableError) as exc:
@@ -966,7 +972,8 @@ class ApplianceController:
             )
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
-                    f"Failed to turn off {entity_id}. Error: {exc.error_code}"
+                    f"Failed to turn off {entity_id}. Error: {exc.error_code}",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Cannot control appliance {entity_id}: {exc}"
             raise ApplianceControlError(
@@ -978,7 +985,8 @@ class ApplianceController:
             logger.exception("Service call failed", entity_id=entity_id, error=str(exc))
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
-                    f"Failed to turn off {entity_id}. Error: Service call failed"
+                    f"Failed to turn off {entity_id}. Error: Service call failed",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Failed to turn off appliance {entity_id}: {exc}"
             raise RetryableError(
@@ -992,7 +1000,8 @@ class ApplianceController:
             )
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
-                    f"Failed to turn off {entity_id}. Error: {type(exc).__name__}"
+                    f"Failed to turn off {entity_id}. Error: {type(exc).__name__}",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Unexpected error turning off appliance {entity_id}: {exc}"
             raise ApplianceControlError(
@@ -1073,7 +1082,8 @@ class ApplianceController:
 
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
-                    f"Service call: Turned off {entity_id}. Reason: {reason}"
+                    f"Service call: Turned off {entity_id}. Reason: {reason}",
+                    category=NOTIFY_SHED,
                 )
 
         except (EntityNotFoundError, EntityUnavailableError) as exc:
@@ -1094,7 +1104,8 @@ class ApplianceController:
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
                     f"Service call failed: Cannot turn off {entity_id}. "
-                    f"Error: {exc.error_code}"
+                    f"Error: {exc.error_code}",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Cannot control appliance {entity_id}: {exc}"
             raise ApplianceControlError(
@@ -1107,7 +1118,8 @@ class ApplianceController:
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
                     f"Service call failed: Turn off {entity_id}. "
-                    "Error: Service call failed"
+                    "Error: Service call failed",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Failed to turn off appliance {entity_id}: {exc}"
             raise ApplianceControlError(
@@ -1120,7 +1132,8 @@ class ApplianceController:
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
                     f"Service call failed: Turn off {entity_id}. "
-                    f"Error: {type(exc).__name__}"
+                    f"Error: {type(exc).__name__}",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Unexpected error turning off appliance {entity_id}: {exc}"
             raise ApplianceControlError(
@@ -1210,7 +1223,8 @@ class ApplianceController:
 
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
-                    f"Service call: Turned on {entity_id}. Reason: {reason}"
+                    f"Service call: Turned on {entity_id}. Reason: {reason}",
+                    category=NOTIFY_RESTORE,
                 )
 
         except (EntityNotFoundError, EntityUnavailableError) as exc:
@@ -1222,7 +1236,8 @@ class ApplianceController:
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
                     f"Service call failed: Cannot turn on {entity_id}. "
-                    f"Error: {exc.error_code}"
+                    f"Error: {exc.error_code}",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Cannot control appliance {entity_id}: {exc}"
             raise ApplianceControlError(
@@ -1235,7 +1250,8 @@ class ApplianceController:
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
                     f"Service call failed: Turn on {entity_id}. "
-                    "Error: Service call failed"
+                    "Error: Service call failed",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Failed to turn on appliance {entity_id}: {exc}"
             raise ApplianceControlError(
@@ -1248,7 +1264,8 @@ class ApplianceController:
             if self._event_log_sensor:
                 self._event_log_sensor.add_log_entry(
                     f"Service call failed: Turn on {entity_id}. "
-                    f"Error: {type(exc).__name__}"
+                    f"Error: {type(exc).__name__}",
+                    category=NOTIFY_PROBLEM,
                 )
             msg = f"Unexpected error turning on appliance {entity_id}: {exc}"
             raise ApplianceControlError(

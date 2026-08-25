@@ -63,7 +63,8 @@
           "edit_main_sensor": "Configura sensore principale",
           "add_sensor": "Aggiungi nuovo sensore monitorato",
           "edit_sensor_{i}": "Modifica: {sensor_name}",
-          "finish": "Termina configurazione"
+          "finish": "Termina configurazione",
+          "edit_notifications": "Impostazioni notifiche"
         },
         "data": {
           "action": "Azione"
@@ -80,7 +81,8 @@
           "edit_main_sensor": "Configura sensore principale",
           "add_sensor": "Aggiungi nuovo sensore monitorato",
           "edit_sensor_{i}": "Modifica: {sensor_name}",
-          "finish": "Termina configurazione"
+          "finish": "Termina configurazione",
+          "edit_notifications": "Impostazioni notifiche"
         },
         "data": {
           "action": "Azione"
@@ -99,9 +101,7 @@
           "cooldown_seconds": "Tempo di attesa (secondi)",
           "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
           "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
-          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)",
-          "notify_persistent": "Notifica persistente per gli eventi del bilanciatore",
-          "notify_service": "Servizio di notifica per gli eventi del bilanciatore (es. app mobile)"
+          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)"
         },
         "description": "Configura il sensore di potenza principale, il budget di potenza e il tempo di attesa predefinito prima che i dispositivi possano essere riaccesi dopo lo spegnimento.",
         "title": "Modifica impostazioni sensore principale",
@@ -146,6 +146,15 @@
         "abort": {
           "invalid_sensor_index": "Sensore non valido selezionato per la modifica."
         }
+      },
+      "edit_notifications": {
+        "title": "Impostazioni notifiche",
+        "description": "Scegli come il bilanciatore ti comunica cosa ha fatto. Tutto viene sempre scritto nel registro eventi e sul bus; queste impostazioni decidono solo cosa vale la pena segnalarti.",
+        "data": {
+          "notify_persistent": "Mostra una notifica persistente",
+          "notify_service": "Servizio di notifica (es. app mobile)",
+          "notify_categories": "Notificami"
+        }
       }
     },
     "error": {
@@ -168,7 +177,8 @@
           "edit_main_sensor": "Modifica impostazioni sensore principale",
           "add_sensor": "Aggiungi nuovo sensore monitorato",
           "edit_sensor_{i}": "Modifica: {sensor_name}",
-          "finish": "Salva configurazione"
+          "finish": "Salva configurazione",
+          "edit_notifications": "Impostazioni notifiche"
         },
         "data": {
           "action": "Azione"
@@ -221,14 +231,21 @@
           "cooldown_seconds": "Tempo di attesa (secondi)",
           "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
           "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
-          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)",
-          "notify_persistent": "Notifica persistente per gli eventi del bilanciatore",
-          "notify_service": "Servizio di notifica per gli eventi del bilanciatore (es. app mobile)"
+          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)"
         },
         "description": "Modifica il sensore di potenza principale, il budget di potenza e le impostazioni di attesa.",
         "title": "Modifica impostazioni sensore principale",
         "errors": {
           "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
+        }
+      },
+      "edit_notifications": {
+        "title": "Impostazioni notifiche",
+        "description": "Scegli come il bilanciatore ti comunica cosa ha fatto. Tutto viene sempre scritto nel registro eventi e sul bus; queste impostazioni decidono solo cosa vale la pena segnalarti.",
+        "data": {
+          "notify_persistent": "Mostra una notifica persistente",
+          "notify_service": "Servizio di notifica (es. app mobile)",
+          "notify_categories": "Notificami"
         }
       }
     },

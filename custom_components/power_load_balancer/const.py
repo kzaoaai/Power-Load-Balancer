@@ -42,9 +42,20 @@ RESTORE_UNKNOWN_SIZE_FRACTION = 0.5
 
 CONF_NOTIFY_PERSISTENT = "notify_persistent"
 CONF_NOTIFY_SERVICE = "notify_service"
+CONF_NOTIFY_CATEGORIES = "notify_categories"
 
 DEFAULT_NOTIFY_PERSISTENT = False
 DEFAULT_NOTIFY_SERVICE = ""
+
+# What a balancer event is about. Every event is always recorded and put on
+# the bus; these only decide which ones are worth interrupting someone for.
+NOTIFY_SHED = "shed"
+NOTIFY_RESTORE = "restore"
+NOTIFY_BUDGET = "budget"
+NOTIFY_PROBLEM = "problem"
+
+NOTIFY_CATEGORIES = (NOTIFY_SHED, NOTIFY_RESTORE, NOTIFY_BUDGET, NOTIFY_PROBLEM)
+DEFAULT_NOTIFY_CATEGORIES = [NOTIFY_SHED, NOTIFY_PROBLEM]
 
 EVENT_POWER_LOAD_BALANCER = "power_load_balancer_event"
 

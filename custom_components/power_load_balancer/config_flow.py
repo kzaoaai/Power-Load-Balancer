@@ -41,6 +41,7 @@ from .const import (
     CONF_LAST_RESORT,
     CONF_MAIN_POWER_SENSOR,
     CONF_NOMINAL_POWER_WATT,
+    CONF_NOTIFY_CATEGORIES,
     CONF_NOTIFY_PERSISTENT,
     CONF_NOTIFY_SERVICE,
     CONF_POWER_BUDGET_WATT,
@@ -50,12 +51,18 @@ from .const import (
     CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_NOMINAL_POWER_WATT,
+    DEFAULT_NOTIFY_CATEGORIES,
     DEFAULT_NOTIFY_PERSISTENT,
     DEFAULT_NOTIFY_SERVICE,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
     DEFAULT_SUSTAINED_ENABLED,
     DEFAULT_SUSTAINED_THRESHOLD_PERCENT,
     DOMAIN,
+    NOTIFY_BUDGET,
+    NOTIFY_CATEGORIES,
+    NOTIFY_PROBLEM,
+    NOTIFY_RESTORE,
+    NOTIFY_SHED,
     SUPPORTED_APPLIANCE_DOMAINS,
 )
 
@@ -165,6 +172,26 @@ def _notify_schema_fields(
                 custom_value=True,
             )
         ),
+        vol.Optional(
+            CONF_NOTIFY_CATEGORIES,
+            default=list(
+                config_data.get(CONF_NOTIFY_CATEGORIES, DEFAULT_NOTIFY_CATEGORIES)
+            ),
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    SelectOptionDict(value=category, label=label)
+                    for category, label in (
+                        (NOTIFY_SHED, "An appliance was switched off"),
+                        (NOTIFY_RESTORE, "An appliance was switched back on"),
+                        (NOTIFY_BUDGET, "The power budget changed"),
+                        (NOTIFY_PROBLEM, "Something needs attention"),
+                    )
+                ],
+                mode=SelectSelectorMode.LIST,
+                multiple=True,
+            )
+        ),
     }
 
 
@@ -183,6 +210,12 @@ def _store_notify_options(
     if service == NOTIFY_SERVICE_DISABLED:
         service = DEFAULT_NOTIFY_SERVICE
     config_data[CONF_NOTIFY_SERVICE] = service
+
+    categories = user_input.get(CONF_NOTIFY_CATEGORIES)
+    if isinstance(categories, list):
+        config_data[CONF_NOTIFY_CATEGORIES] = [
+            str(category) for category in categories if category in NOTIFY_CATEGORIES
+        ]
 
 
 def _store_sustained_options(
@@ -360,6 +393,7 @@ def _build_menu_options(
         else "Configure Main Sensor"
     )
     options["edit_main_sensor"] = main_sensor_text
+    options["edit_notifications"] = "Notification Settings"
     options["add_sensor"] = "Add New Monitored Sensor"
 
     configured_sensors: list[dict[str, Any]] = config_data.get(CONF_POWER_SENSORS, [])
@@ -514,6 +548,8 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
             action = user_input.get("action")
             if action == "edit_main_sensor":
                 return await self.async_step_edit_main_sensor()
+            if action == "edit_notifications":
+                return await self.async_step_edit_notifications()
             if action == "add_sensor":
                 return await self.async_step_add_sensor()
             if action and str(action).startswith("edit_sensor_"):
@@ -582,7 +618,6 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
                 else:
                     self._config_data[CONF_COOLDOWN_SECONDS] = DEFAULT_COOLDOWN_SECONDS
                 _store_sustained_options(self._config_data, user_input)
-                _store_notify_options(self._config_data, user_input)
                 return await self.async_step_user()
 
         schema_dict: dict[Any, Any] = {}
@@ -620,12 +655,31 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         )
         schema_dict.update(_sustained_schema_fields(self._config_data))
-        schema_dict.update(_notify_schema_fields(self.hass, self._config_data))
 
         return self.async_show_form(
             step_id="edit_main_sensor",
             data_schema=vol.Schema(schema_dict),
             errors=errors,
+        )
+
+    async def async_step_edit_notifications(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """
+        Show the notification settings.
+
+        These belong beside the balancer's own settings rather than inside the
+        main sensor form: they say nothing about which meter is read or what
+        the ceiling is, and burying them under an unrelated heading is why
+        they were hard to find.
+        """
+        if user_input is not None:
+            _store_notify_options(self._config_data, user_input)
+            return await self.async_step_user()
+
+        return self.async_show_form(
+            step_id="edit_notifications",
+            data_schema=vol.Schema(_notify_schema_fields(self.hass, self._config_data)),
         )
 
     async def async_step_add_sensor(
@@ -833,6 +887,8 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             action = user_input.get("action", "")
             if action == "edit_main_sensor":
                 return await self.async_step_edit_main_sensor()
+            if action == "edit_notifications":
+                return await self.async_step_edit_notifications()
             if action == "add_sensor":
                 return await self.async_step_add_sensor()
             if action == "finish":
@@ -864,6 +920,26 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="sensor_menu",
             data_schema=vol.Schema({vol.Required("action"): vol.In(options)}),
+        )
+
+    async def async_step_edit_notifications(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """
+        Show the notification settings.
+
+        These belong beside the balancer's own settings rather than inside the
+        main sensor form: they say nothing about which meter is read or what
+        the ceiling is, and burying them under an unrelated heading is why
+        they were hard to find.
+        """
+        if user_input is not None:
+            _store_notify_options(self._config_data, user_input)
+            return await self.async_step_sensor_menu()
+
+        return self.async_show_form(
+            step_id="edit_notifications",
+            data_schema=vol.Schema(_notify_schema_fields(self.hass, self._config_data)),
         )
 
     async def async_step_add_sensor(
@@ -1005,7 +1081,6 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
                 else:
                     self._config_data[CONF_COOLDOWN_SECONDS] = DEFAULT_COOLDOWN_SECONDS
                 _store_sustained_options(self._config_data, user_input)
-                _store_notify_options(self._config_data, user_input)
                 return await self.async_step_sensor_menu()
 
         current_cooldown = self._config_data.get(
@@ -1035,7 +1110,6 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             ),
         }
         schema_dict.update(_sustained_schema_fields(self._config_data))
-        schema_dict.update(_notify_schema_fields(self.hass, self._config_data))
 
         return self.async_show_form(
             step_id="edit_main_sensor",
