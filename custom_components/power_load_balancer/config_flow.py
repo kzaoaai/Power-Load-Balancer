@@ -34,6 +34,9 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CHANNEL_BOTH,
+    CHANNEL_NONE,
+    CHANNEL_SERVICE,
     CONF_APPLIANCE,
     CONF_COOLDOWN_SECONDS,
     CONF_DEVICE_COOLDOWN,
@@ -41,8 +44,7 @@ from .const import (
     CONF_LAST_RESORT,
     CONF_MAIN_POWER_SENSOR,
     CONF_NOMINAL_POWER_WATT,
-    CONF_NOTIFY_CATEGORIES,
-    CONF_NOTIFY_PERSISTENT,
+    CONF_NOTIFY_CHANNELS,
     CONF_NOTIFY_SERVICE,
     CONF_POWER_BUDGET_WATT,
     CONF_POWER_SENSORS,
@@ -51,20 +53,16 @@ from .const import (
     CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_NOMINAL_POWER_WATT,
-    DEFAULT_NOTIFY_CATEGORIES,
-    DEFAULT_NOTIFY_PERSISTENT,
     DEFAULT_NOTIFY_SERVICE,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
     DEFAULT_SUSTAINED_ENABLED,
     DEFAULT_SUSTAINED_THRESHOLD_PERCENT,
     DOMAIN,
-    NOTIFY_BUDGET,
     NOTIFY_CATEGORIES,
-    NOTIFY_PROBLEM,
-    NOTIFY_RESTORE,
-    NOTIFY_SHED,
+    NOTIFY_CHANNELS,
     SUPPORTED_APPLIANCE_DOMAINS,
 )
+from .notify_channels import resolve_notify_channels
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -139,6 +137,11 @@ def _sustained_schema_fields(config_data: dict[str, Any]) -> dict[Any, Any]:
 NOTIFY_SERVICE_DISABLED = "none"
 
 
+def _channel_field(category: str) -> str:
+    """Return the form field name carrying one category's delivery choice."""
+    return f"notify_channel_{category}"
+
+
 def _notify_schema_fields(
     hass: HomeAssistant, config_data: dict[str, Any]
 ) -> dict[Any, Any]:
@@ -156,13 +159,8 @@ def _notify_schema_fields(
                 value=current, label=f"notify.{current} (not currently loaded)"
             )
         )
-    return {
-        vol.Required(
-            CONF_NOTIFY_PERSISTENT,
-            default=bool(
-                config_data.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT)
-            ),
-        ): bool,
+    channels = resolve_notify_channels(config_data)
+    fields: dict[Any, Any] = {
         vol.Required(
             CONF_NOTIFY_SERVICE, default=current or NOTIFY_SERVICE_DISABLED
         ): SelectSelector(
@@ -172,50 +170,69 @@ def _notify_schema_fields(
                 custom_value=True,
             )
         ),
-        vol.Optional(
-            CONF_NOTIFY_CATEGORIES,
-            default=list(
-                config_data.get(CONF_NOTIFY_CATEGORIES, DEFAULT_NOTIFY_CATEGORIES)
-            ),
-        ): SelectSelector(
-            SelectSelectorConfig(
-                options=[
-                    SelectOptionDict(value=category, label=label)
-                    for category, label in (
-                        (NOTIFY_SHED, "An appliance was switched off"),
-                        (NOTIFY_RESTORE, "An appliance was switched back on"),
-                        (NOTIFY_BUDGET, "The power budget changed"),
-                        (NOTIFY_PROBLEM, "Something needs attention"),
-                    )
-                ],
-                mode=SelectSelectorMode.LIST,
-                multiple=True,
-            )
-        ),
     }
+    # One line per kind of event, each with its own delivery choice: a shed
+    # and a budget change rarely deserve the same treatment.
+    for category in NOTIFY_CATEGORIES:
+        fields[
+            vol.Required(
+                _channel_field(category),
+                default=channels.get(category, CHANNEL_NONE),
+            )
+        ] = SelectSelector(
+            SelectSelectorConfig(
+                options=list(NOTIFY_CHANNELS),
+                mode=SelectSelectorMode.DROPDOWN,
+                translation_key="notify_channel",
+            )
+        )
+    return fields
+
+
+def _notify_service_from_input(user_input: dict[str, Any]) -> str:
+    """Return the notify service name a submitted form selected, if any."""
+    service = user_input.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
+    if not isinstance(service, str):
+        return DEFAULT_NOTIFY_SERVICE
+    # The picker allows a typed value, so strip on both sides of the prefix:
+    # "notify. mobile_app_x" would otherwise store a leading space, pass the
+    # guard below as a non-empty name, and then fail every send.
+    service = service.strip().removeprefix("notify.").strip()
+    if service.lower() == NOTIFY_SERVICE_DISABLED:
+        return DEFAULT_NOTIFY_SERVICE
+    return service
+
+
+def _validate_notify_options(user_input: dict[str, Any]) -> dict[str, str]:
+    """
+    Return form errors for an inconsistent notification setup.
+
+    Asking for a push with no service behind it is the one mistake worth
+    blocking: it looks configured and delivers nothing, which is exactly how
+    an alert goes unnoticed for weeks.
+    """
+    if _notify_service_from_input(user_input):
+        return {}
+    wants_service = any(
+        user_input.get(_channel_field(category)) in (CHANNEL_SERVICE, CHANNEL_BOTH)
+        for category in NOTIFY_CATEGORIES
+    )
+    return {"base": "notify_service_required"} if wants_service else {}
 
 
 def _store_notify_options(
     config_data: dict[str, Any], user_input: dict[str, Any]
 ) -> None:
     """Store validated notification options into config data."""
-    config_data[CONF_NOTIFY_PERSISTENT] = bool(
-        user_input.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT)
-    )
-    service = user_input.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
-    if isinstance(service, str):
-        service = service.strip().removeprefix("notify.")
-    else:
-        service = DEFAULT_NOTIFY_SERVICE
-    if service == NOTIFY_SERVICE_DISABLED:
-        service = DEFAULT_NOTIFY_SERVICE
-    config_data[CONF_NOTIFY_SERVICE] = service
+    config_data[CONF_NOTIFY_SERVICE] = _notify_service_from_input(user_input)
 
-    categories = user_input.get(CONF_NOTIFY_CATEGORIES)
-    if isinstance(categories, list):
-        config_data[CONF_NOTIFY_CATEGORIES] = [
-            str(category) for category in categories if category in NOTIFY_CATEGORIES
-        ]
+    channels: dict[str, str] = {}
+    for category in NOTIFY_CATEGORIES:
+        channel = user_input.get(_channel_field(category), CHANNEL_NONE)
+        channels[category] = (
+            str(channel) if channel in NOTIFY_CHANNELS else CHANNEL_NONE
+        )
+    config_data[CONF_NOTIFY_CHANNELS] = channels
 
 
 def _store_sustained_options(
@@ -673,13 +690,22 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
         the ceiling is, and burying them under an unrelated heading is why
         they were hard to find.
         """
+        errors: dict[str, str] = {}
+        prefill = self._config_data
         if user_input is not None:
-            _store_notify_options(self._config_data, user_input)
-            return await self.async_step_user()
+            errors = _validate_notify_options(user_input)
+            if not errors:
+                _store_notify_options(self._config_data, user_input)
+                return await self.async_step_user()
+            # Re-show what was just submitted rather than what was saved, so a
+            # rejected form does not throw the choices away.
+            prefill = dict(self._config_data)
+            _store_notify_options(prefill, user_input)
 
         return self.async_show_form(
             step_id="edit_notifications",
-            data_schema=vol.Schema(_notify_schema_fields(self.hass, self._config_data)),
+            data_schema=vol.Schema(_notify_schema_fields(self.hass, prefill)),
+            errors=errors,
         )
 
     async def async_step_add_sensor(
@@ -933,13 +959,22 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
         the ceiling is, and burying them under an unrelated heading is why
         they were hard to find.
         """
+        errors: dict[str, str] = {}
+        prefill = self._config_data
         if user_input is not None:
-            _store_notify_options(self._config_data, user_input)
-            return await self.async_step_sensor_menu()
+            errors = _validate_notify_options(user_input)
+            if not errors:
+                _store_notify_options(self._config_data, user_input)
+                return await self.async_step_sensor_menu()
+            # Re-show what was just submitted rather than what was saved, so a
+            # rejected form does not throw the choices away.
+            prefill = dict(self._config_data)
+            _store_notify_options(prefill, user_input)
 
         return self.async_show_form(
             step_id="edit_notifications",
-            data_schema=vol.Schema(_notify_schema_fields(self.hass, self._config_data)),
+            data_schema=vol.Schema(_notify_schema_fields(self.hass, prefill)),
+            errors=errors,
         )
 
     async def async_step_add_sensor(

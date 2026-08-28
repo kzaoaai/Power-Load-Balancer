@@ -35,8 +35,6 @@ from .const import (
     CONF_APPLIANCE,
     CONF_COOLDOWN_SECONDS,
     CONF_MAIN_POWER_SENSOR,
-    CONF_NOTIFY_CATEGORIES,
-    CONF_NOTIFY_PERSISTENT,
     CONF_NOTIFY_SERVICE,
     CONF_POWER_BUDGET_WATT,
     CONF_POWER_SENSORS,
@@ -44,8 +42,6 @@ from .const import (
     CONF_SUSTAINED_ENABLED,
     CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_COOLDOWN_SECONDS,
-    DEFAULT_NOTIFY_CATEGORIES,
-    DEFAULT_NOTIFY_PERSISTENT,
     DEFAULT_NOTIFY_SERVICE,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
     DEFAULT_SUSTAINED_ENABLED,
@@ -66,6 +62,7 @@ from .const import (
 from .context_logger import ContextLogger
 from .event_dispatcher import BalancerEventDispatcher
 from .exceptions import ConfigurationError
+from .notify_channels import resolve_notify_channels
 from .power_monitor import PowerMonitor
 
 _LOGGER = logging.getLogger(__name__)
@@ -178,15 +175,10 @@ class PowerLoadBalancer:
         self._event_dispatcher = BalancerEventDispatcher(
             hass,
             config_data["entry_id"],
-            notify_persistent=bool(
-                config_data.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT)
-            ),
             notify_service=str(
                 config_data.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
             ),
-            categories=config_data.get(
-                CONF_NOTIFY_CATEGORIES, DEFAULT_NOTIFY_CATEGORIES
-            ),
+            channels=resolve_notify_channels(config_data),
         )
 
         self._power_monitor = PowerMonitor(

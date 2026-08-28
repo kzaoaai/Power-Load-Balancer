@@ -149,16 +149,19 @@
       },
       "edit_notifications": {
         "title": "Notification Settings",
-        "description": "Choose how the balancer tells you what it did. Everything is always written to the event log and the event bus; these settings only decide what is worth interrupting you for.",
+        "description": "Everything the balancer does is always written to its event log and put on the event bus. Choose here which of them are also worth interrupting you for, and how.",
         "data": {
-          "notify_persistent": "Show a persistent notification",
-          "notify_service": "Notify service (e.g. a mobile app)",
-          "notify_categories": "Notify me about"
+          "notify_service": "Device to notify",
+          "notify_channel_shed": "An appliance was switched off",
+          "notify_channel_restore": "An appliance was switched back on",
+          "notify_channel_budget": "The power budget changed",
+          "notify_channel_problem": "Something needs attention"
         }
       }
     },
     "error": {
-      "valid_budget_required": "Please enter a valid power budget (a positive integer)."
+      "valid_budget_required": "Please enter a valid power budget (a positive integer).",
+      "notify_service_required": "Choose a device to notify, or set those events to “Notification in Home Assistant” instead."
     }
   },
   "options": {
@@ -241,16 +244,29 @@
       },
       "edit_notifications": {
         "title": "Notification Settings",
-        "description": "Choose how the balancer tells you what it did. Everything is always written to the event log and the event bus; these settings only decide what is worth interrupting you for.",
+        "description": "Everything the balancer does is always written to its event log and put on the event bus. Choose here which of them are also worth interrupting you for, and how.",
         "data": {
-          "notify_persistent": "Show a persistent notification",
-          "notify_service": "Notify service (e.g. a mobile app)",
-          "notify_categories": "Notify me about"
+          "notify_service": "Device to notify",
+          "notify_channel_shed": "An appliance was switched off",
+          "notify_channel_restore": "An appliance was switched back on",
+          "notify_channel_budget": "The power budget changed",
+          "notify_channel_problem": "Something needs attention"
         }
       }
     },
     "error": {
-      "valid_budget_required": "Please enter a valid power budget (a positive integer)."
+      "valid_budget_required": "Please enter a valid power budget (a positive integer).",
+      "notify_service_required": "Choose a device to notify, or set those events to “Notification in Home Assistant” instead."
+    }
+  },
+  "selector": {
+    "notify_channel": {
+      "options": {
+        "none": "Don't notify me",
+        "persistent": "Notification in Home Assistant",
+        "service": "Push to my device",
+        "both": "Both"
+      }
     }
   }
 }

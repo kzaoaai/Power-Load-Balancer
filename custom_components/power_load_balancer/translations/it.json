@@ -149,16 +149,19 @@
       },
       "edit_notifications": {
         "title": "Impostazioni notifiche",
-        "description": "Scegli come il bilanciatore ti comunica cosa ha fatto. Tutto viene sempre scritto nel registro eventi e sul bus; queste impostazioni decidono solo cosa vale la pena segnalarti.",
+        "description": "Tutto ciò che fa il bilanciatore viene sempre scritto nel suo registro eventi e pubblicato sul bus. Qui scegli quali eventi meritano anche di interromperti, e in che modo.",
         "data": {
-          "notify_persistent": "Mostra una notifica persistente",
-          "notify_service": "Servizio di notifica (es. app mobile)",
-          "notify_categories": "Notificami"
+          "notify_service": "Dispositivo da avvisare",
+          "notify_channel_shed": "Un elettrodomestico è stato spento",
+          "notify_channel_restore": "Un elettrodomestico è stato riacceso",
+          "notify_channel_budget": "Il budget di potenza è cambiato",
+          "notify_channel_problem": "Qualcosa richiede attenzione"
         }
       }
     },
     "error": {
-      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
+      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
+      "notify_service_required": "Scegli un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”."
     }
   },
   "options": {
@@ -241,16 +244,29 @@
       },
       "edit_notifications": {
         "title": "Impostazioni notifiche",
-        "description": "Scegli come il bilanciatore ti comunica cosa ha fatto. Tutto viene sempre scritto nel registro eventi e sul bus; queste impostazioni decidono solo cosa vale la pena segnalarti.",
+        "description": "Tutto ciò che fa il bilanciatore viene sempre scritto nel suo registro eventi e pubblicato sul bus. Qui scegli quali eventi meritano anche di interromperti, e in che modo.",
         "data": {
-          "notify_persistent": "Mostra una notifica persistente",
-          "notify_service": "Servizio di notifica (es. app mobile)",
-          "notify_categories": "Notificami"
+          "notify_service": "Dispositivo da avvisare",
+          "notify_channel_shed": "Un elettrodomestico è stato spento",
+          "notify_channel_restore": "Un elettrodomestico è stato riacceso",
+          "notify_channel_budget": "Il budget di potenza è cambiato",
+          "notify_channel_problem": "Qualcosa richiede attenzione"
         }
       }
     },
     "error": {
-      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
+      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
+      "notify_service_required": "Scegli un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”."
+    }
+  },
+  "selector": {
+    "notify_channel": {
+      "options": {
+        "none": "Non avvisarmi",
+        "persistent": "Notifica in Home Assistant",
+        "service": "Notifica push sul dispositivo",
+        "both": "Entrambe"
+      }
     }
   }
 }

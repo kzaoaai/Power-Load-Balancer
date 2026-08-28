@@ -16,7 +16,10 @@ from homeassistant.core import callback
 from homeassistant.exceptions import ServiceNotFound
 
 from .const import (
-    DEFAULT_NOTIFY_CATEGORIES,
+    CHANNEL_BOTH,
+    CHANNEL_NONE,
+    CHANNEL_PERSISTENT,
+    CHANNEL_SERVICE,
     DOMAIN,
     EVENT_POWER_LOAD_BALANCER,
     NOTIFY_PROBLEM,
@@ -47,9 +50,8 @@ class BalancerEventDispatcher:
         hass: HomeAssistant,
         entry_id: str,
         *,
-        notify_persistent: bool,
         notify_service: str,
-        categories: list[str] | None = None,
+        channels: dict[str, str],
     ) -> None:
         """
         Initialize the dispatcher.
@@ -58,21 +60,17 @@ class BalancerEventDispatcher:
             hass: Home Assistant instance.
             entry_id: Config entry id, included in bus events and used for
                 the persistent notification id.
-            notify_persistent: Whether to raise a persistent notification
-                for each event.
             notify_service: Service name under the notify domain to send
                 events to, or an empty string to disable.
-            categories: Which kinds of event are worth a notification. The
-                event log and the bus event always receive everything.
+            channels: Delivery channel per event category, as returned by
+                resolve_notify_channels. The event log and the bus event
+                always receive everything regardless.
 
         """
         self.hass = hass
         self._entry_id = entry_id
-        self._notify_persistent = notify_persistent
         self._notify_service = notify_service
-        self._categories = set(
-            DEFAULT_NOTIFY_CATEGORIES if categories is None else categories
-        )
+        self._channels = dict(channels)
         self._sensor: Any = None
         self._notify_failure_logged = False
 
@@ -88,7 +86,8 @@ class BalancerEventDispatcher:
         The event log and the bus event always receive everything: they are
         the record, and a record with holes in it is worse than none at all
         when working out afterwards what the balancer did. The category only
-        decides whether the event is worth interrupting someone for.
+        decides which notification channel, if any, this event is worth
+        interrupting someone through.
 
         Keeps the add_log_entry name so existing callers can treat the
         dispatcher exactly like the event-log sensor it wraps.
@@ -105,10 +104,9 @@ class BalancerEventDispatcher:
             },
         )
 
-        if category not in self._categories:
-            return
+        channel = self._channels.get(category, CHANNEL_NONE)
 
-        if self._notify_persistent:
+        if channel in (CHANNEL_PERSISTENT, CHANNEL_BOTH):
             try:
                 persistent_notification.async_create(
                     self.hass,
@@ -119,7 +117,7 @@ class BalancerEventDispatcher:
             except Exception:
                 _LOGGER.exception("Failed to create persistent notification")
 
-        if self._notify_service:
+        if channel in (CHANNEL_SERVICE, CHANNEL_BOTH) and self._notify_service:
             self.hass.async_create_task(self._async_send_notify(message))
 
     async def _async_send_notify(self, message: str) -> None:
@@ -168,8 +166,7 @@ class BalancerEventDispatcher:
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return notification configuration for diagnostics."""
         return {
-            "notify_persistent": self._notify_persistent,
             "notify_service": self._notify_service or None,
-            "notify_categories": sorted(self._categories),
+            "notify_channels": dict(self._channels),
             "sensor_registered": self._sensor is not None,
         }
