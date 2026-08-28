@@ -50,7 +50,7 @@ class BalancerEventDispatcher:
         hass: HomeAssistant,
         entry_id: str,
         *,
-        notify_service: str,
+        notify_services: list[str],
         channels: dict[str, str],
     ) -> None:
         """
@@ -60,8 +60,8 @@ class BalancerEventDispatcher:
             hass: Home Assistant instance.
             entry_id: Config entry id, included in bus events and used for
                 the persistent notification id.
-            notify_service: Service name under the notify domain to send
-                events to, or an empty string to disable.
+            notify_services: Service names under the notify domain to send
+                events to. Empty disables pushing entirely.
             channels: Delivery channel per event category, as returned by
                 resolve_notify_channels. The event log and the bus event
                 always receive everything regardless.
@@ -69,10 +69,12 @@ class BalancerEventDispatcher:
         """
         self.hass = hass
         self._entry_id = entry_id
-        self._notify_service = notify_service
+        self._notify_services = list(notify_services)
         self._channels = dict(channels)
         self._sensor: Any = None
-        self._notify_failure_logged = False
+        # Tracked per service: one unreachable notifier must not suppress the
+        # warning for a different one that breaks later.
+        self._notify_failure_logged: set[str] = set()
 
     def set_sensor(self, sensor: Any) -> None:
         """Register the event-log sensor that should receive events."""
@@ -117,41 +119,42 @@ class BalancerEventDispatcher:
             except Exception:
                 _LOGGER.exception("Failed to create persistent notification")
 
-        if channel in (CHANNEL_SERVICE, CHANNEL_BOTH) and self._notify_service:
-            self.hass.async_create_task(self._async_send_notify(message))
+        if channel in (CHANNEL_SERVICE, CHANNEL_BOTH):
+            for service in self._notify_services:
+                self.hass.async_create_task(self._async_send_notify(service, message))
 
-    async def _async_send_notify(self, message: str) -> None:
-        """Send one event message through the configured notify service."""
+    async def _async_send_notify(self, service: str, message: str) -> None:
+        """Send one event message through one configured notify service."""
         try:
             await self.hass.services.async_call(
                 "notify",
-                self._notify_service,
+                service,
                 {"title": NOTIFICATION_TITLE, "message": message},
                 blocking=False,
             )
         except ServiceNotFound:
-            if not self._notify_failure_logged:
+            if service not in self._notify_failure_logged:
                 _LOGGER.warning(
-                    "notify.%s is not available; balancer notifications are "
-                    "dropped until the service appears (this is logged once)",
-                    self._notify_service,
+                    "notify.%s is not available; balancer notifications to it "
+                    "are dropped until the service appears (logged once)",
+                    service,
                 )
-                self._notify_failure_logged = True
+                self._notify_failure_logged.add(service)
         except Exception:
-            if not self._notify_failure_logged:
+            if service not in self._notify_failure_logged:
                 _LOGGER.exception(
                     "Failed to send notification via notify.%s "
                     "(this is logged once until a send succeeds)",
-                    self._notify_service,
+                    service,
                 )
-                self._notify_failure_logged = True
+                self._notify_failure_logged.add(service)
         else:
-            if self._notify_failure_logged:
+            if service in self._notify_failure_logged:
                 _LOGGER.info(
                     "notify.%s is available again; balancer notifications resumed",
-                    self._notify_service,
+                    service,
                 )
-            self._notify_failure_logged = False
+                self._notify_failure_logged.discard(service)
 
     @callback
     def async_dismiss_persistent(self) -> None:
@@ -166,7 +169,7 @@ class BalancerEventDispatcher:
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return notification configuration for diagnostics."""
         return {
-            "notify_service": self._notify_service or None,
+            "notify_services": list(self._notify_services),
             "notify_channels": dict(self._channels),
             "sensor_registered": self._sensor is not None,
         }

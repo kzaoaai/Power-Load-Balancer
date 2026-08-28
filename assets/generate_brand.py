@@ -52,12 +52,16 @@ jobs = [
 
 for name, src, w, h in jobs:
     cairosvg.svg2png(
-        bytestring=src.encode(), write_to=f"{OUT}/{name}", output_width=w, output_height=h
+        bytestring=src.encode(),
+        write_to=f"{OUT}/{name}",
+        output_width=w,
+        output_height=h,
     )
     print(f"{name}: {w}x{h}")
 
 open(f"{OUT}/../final_icon.svg", "w").write(icon_svg())
 open(f"{OUT}/../final_logo.svg", "w").write(logo_svg("#1B2A36"))
+
 
 # preview sheet for the logo variants
 def _inner(s):

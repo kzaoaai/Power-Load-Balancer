@@ -45,7 +45,7 @@ from .const import (
     CONF_MAIN_POWER_SENSOR,
     CONF_NOMINAL_POWER_WATT,
     CONF_NOTIFY_CHANNELS,
-    CONF_NOTIFY_SERVICE,
+    CONF_NOTIFY_SERVICES,
     CONF_POWER_BUDGET_WATT,
     CONF_POWER_SENSORS,
     CONF_SUSTAINED_DURATION_SECONDS,
@@ -53,7 +53,6 @@ from .const import (
     CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_NOMINAL_POWER_WATT,
-    DEFAULT_NOTIFY_SERVICE,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
     DEFAULT_SUSTAINED_ENABLED,
     DEFAULT_SUSTAINED_THRESHOLD_PERCENT,
@@ -62,7 +61,10 @@ from .const import (
     NOTIFY_CHANNELS,
     SUPPORTED_APPLIANCE_DOMAINS,
 )
-from .notify_channels import resolve_notify_channels
+from .notify_channels import (
+    resolve_notify_channels,
+    resolve_notify_services,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -134,9 +136,6 @@ def _sustained_schema_fields(config_data: dict[str, Any]) -> dict[Any, Any]:
     }
 
 
-NOTIFY_SERVICE_DISABLED = "none"
-
-
 def _channel_field(category: str) -> str:
     """Return the form field name carrying one category's delivery choice."""
     return f"notify_channel_{category}"
@@ -146,28 +145,29 @@ def _notify_schema_fields(
     hass: HomeAssistant, config_data: dict[str, Any]
 ) -> dict[Any, Any]:
     """Return the schema fields for the balancer-event notification options."""
-    notify_services = sorted(hass.services.async_services().get("notify", {}))
-    current = str(config_data.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE))
-    options = [SelectOptionDict(value=NOTIFY_SERVICE_DISABLED, label="Disabled")]
-    options.extend(
+    available = sorted(hass.services.async_services().get("notify", {}))
+    current = resolve_notify_services(config_data)
+    options = [
         SelectOptionDict(value=service, label=f"notify.{service}")
-        for service in notify_services
-    )
-    if current and current not in notify_services:
-        options.append(
-            SelectOptionDict(
-                value=current, label=f"notify.{current} (not currently loaded)"
-            )
+        for service in available
+    ]
+    # A device that is offline right now still has to stay selectable, or
+    # reopening this page would quietly drop it from the selection.
+    options.extend(
+        SelectOptionDict(
+            value=service, label=f"notify.{service} (not currently loaded)"
         )
+        for service in current
+        if service not in available
+    )
     channels = resolve_notify_channels(config_data)
     fields: dict[Any, Any] = {
-        vol.Required(
-            CONF_NOTIFY_SERVICE, default=current or NOTIFY_SERVICE_DISABLED
-        ): SelectSelector(
+        vol.Optional(CONF_NOTIFY_SERVICES, default=list(current)): SelectSelector(
             SelectSelectorConfig(
                 options=options,
                 mode=SelectSelectorMode.DROPDOWN,
                 custom_value=True,
+                multiple=True,
             )
         ),
     }
@@ -189,18 +189,26 @@ def _notify_schema_fields(
     return fields
 
 
-def _notify_service_from_input(user_input: dict[str, Any]) -> str:
-    """Return the notify service name a submitted form selected, if any."""
-    service = user_input.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
-    if not isinstance(service, str):
-        return DEFAULT_NOTIFY_SERVICE
-    # The picker allows a typed value, so strip on both sides of the prefix:
-    # "notify. mobile_app_x" would otherwise store a leading space, pass the
-    # guard below as a non-empty name, and then fail every send.
-    service = service.strip().removeprefix("notify.").strip()
-    if service.lower() == NOTIFY_SERVICE_DISABLED:
-        return DEFAULT_NOTIFY_SERVICE
-    return service
+def _notify_services_from_input(user_input: dict[str, Any]) -> list[str]:
+    """Return the notify service names a submitted form selected."""
+    submitted = user_input.get(CONF_NOTIFY_SERVICES) or []
+    if isinstance(submitted, str):
+        submitted = [submitted]
+    if not isinstance(submitted, list):
+        return []
+
+    services: list[str] = []
+    for raw in submitted:
+        if not isinstance(raw, str):
+            continue
+        # The picker allows typed values, so strip on both sides of the
+        # prefix: "notify. mobile_app_x" would otherwise keep a leading
+        # space, pass the guard below as a non-empty name, and fail every
+        # send.
+        service = raw.strip().removeprefix("notify.").strip()
+        if service and service not in services:
+            services.append(service)
+    return services
 
 
 def _validate_notify_options(user_input: dict[str, Any]) -> dict[str, str]:
@@ -211,7 +219,7 @@ def _validate_notify_options(user_input: dict[str, Any]) -> dict[str, str]:
     blocking: it looks configured and delivers nothing, which is exactly how
     an alert goes unnoticed for weeks.
     """
-    if _notify_service_from_input(user_input):
+    if _notify_services_from_input(user_input):
         return {}
     wants_service = any(
         user_input.get(_channel_field(category)) in (CHANNEL_SERVICE, CHANNEL_BOTH)
@@ -224,7 +232,7 @@ def _store_notify_options(
     config_data: dict[str, Any], user_input: dict[str, Any]
 ) -> None:
     """Store validated notification options into config data."""
-    config_data[CONF_NOTIFY_SERVICE] = _notify_service_from_input(user_input)
+    config_data[CONF_NOTIFY_SERVICES] = _notify_services_from_input(user_input)
 
     channels: dict[str, str] = {}
     for category in NOTIFY_CATEGORIES:

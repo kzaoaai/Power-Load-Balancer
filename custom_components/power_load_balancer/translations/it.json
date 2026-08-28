@@ -129,7 +129,7 @@
         "title": "Impostazioni notifiche",
         "description": "Tutto ciò che fa il bilanciatore viene sempre scritto nel suo registro eventi e pubblicato sul bus. Qui scegli quali eventi meritano anche di interromperti, e in che modo.",
         "data": {
-          "notify_service": "Dispositivo da avvisare",
+          "notify_services": "Dispositivi da avvisare",
           "notify_channel_shed": "Un elettrodomestico è stato spento",
           "notify_channel_restore": "Un elettrodomestico è stato riacceso",
           "notify_channel_budget": "Il budget di potenza è cambiato",
@@ -140,7 +140,7 @@
     "error": {
       "invalid_edit_action": "Azione non valida selezionata per la modifica.",
       "main_sensor_required": "Configura il sensore di potenza principale prima di terminare.",
-      "notify_service_required": "Scegli un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
+      "notify_service_required": "Scegli almeno un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
       "select_appliance_required": "Seleziona l'elettrodomestico controllabile per questo sensore.",
       "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
       "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
@@ -217,7 +217,7 @@
         "title": "Impostazioni notifiche",
         "description": "Tutto ciò che fa il bilanciatore viene sempre scritto nel suo registro eventi e pubblicato sul bus. Qui scegli quali eventi meritano anche di interromperti, e in che modo.",
         "data": {
-          "notify_service": "Dispositivo da avvisare",
+          "notify_services": "Dispositivi da avvisare",
           "notify_channel_shed": "Un elettrodomestico è stato spento",
           "notify_channel_restore": "Un elettrodomestico è stato riacceso",
           "notify_channel_budget": "Il budget di potenza è cambiato",
@@ -226,7 +226,7 @@
       }
     },
     "error": {
-      "notify_service_required": "Scegli un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
+      "notify_service_required": "Scegli almeno un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
       "select_appliance_required": "Seleziona l'elettrodomestico controllabile per questo sensore.",
       "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
       "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."

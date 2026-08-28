@@ -21,6 +21,7 @@ from .const import (
     CONF_NOTIFY_CHANNELS,
     CONF_NOTIFY_PERSISTENT,
     CONF_NOTIFY_SERVICE,
+    CONF_NOTIFY_SERVICES,
     DEFAULT_NOTIFY_PERSISTENT,
     DEFAULT_NOTIFY_SERVICE,
     NOTIFY_CATEGORIES,
@@ -30,6 +31,26 @@ from .const import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from typing import Any
+
+
+def resolve_notify_services(config_data: Mapping[str, Any]) -> list[str]:
+    """
+    Return every notify service an event should be pushed to.
+
+    Stored as a list because one event often needs to reach more than one
+    place. Entries saved when this was a single picker carry a bare string
+    and are read as a one-element list.
+    """
+    stored = config_data.get(CONF_NOTIFY_SERVICES)
+    if isinstance(stored, list):
+        return [
+            name.strip() for name in stored if isinstance(name, str) and name.strip()
+        ]
+
+    legacy = config_data.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
+    if isinstance(legacy, str) and legacy.strip():
+        return [legacy.strip()]
+    return []
 
 
 def resolve_notify_channels(config_data: Mapping[str, Any]) -> dict[str, str]:
@@ -56,8 +77,7 @@ def resolve_notify_channels(config_data: Mapping[str, Any]) -> dict[str, str]:
     persistent = bool(
         config_data.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT)
     )
-    configured = config_data.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
-    service = bool(isinstance(configured, str) and configured.strip())
+    service = bool(resolve_notify_services(config_data))
     if persistent and service:
         legacy_channel = CHANNEL_BOTH
     elif persistent:

@@ -129,7 +129,7 @@
         "title": "Notification Settings",
         "description": "Everything the balancer does is always written to its event log and put on the event bus. Choose here which of them are also worth interrupting you for, and how.",
         "data": {
-          "notify_service": "Device to notify",
+          "notify_services": "Devices to notify",
           "notify_channel_shed": "An appliance was switched off",
           "notify_channel_restore": "An appliance was switched back on",
           "notify_channel_budget": "The power budget changed",
@@ -140,7 +140,7 @@
     "error": {
       "invalid_edit_action": "Invalid action selected for editing.",
       "main_sensor_required": "Please configure the main power sensor before finishing.",
-      "notify_service_required": "Choose a device to notify, or set those events to “Notification in Home Assistant” instead.",
+      "notify_service_required": "Choose at least one device to notify, or set those events to “Notification in Home Assistant” instead.",
       "select_appliance_required": "Please select the controllable appliance for this sensor.",
       "select_sensor_required": "Please select a monitored power sensor.",
       "valid_budget_required": "Please enter a valid power budget (a positive integer)."
@@ -217,7 +217,7 @@
         "title": "Notification Settings",
         "description": "Everything the balancer does is always written to its event log and put on the event bus. Choose here which of them are also worth interrupting you for, and how.",
         "data": {
-          "notify_service": "Device to notify",
+          "notify_services": "Devices to notify",
           "notify_channel_shed": "An appliance was switched off",
           "notify_channel_restore": "An appliance was switched back on",
           "notify_channel_budget": "The power budget changed",
@@ -226,7 +226,7 @@
       }
     },
     "error": {
-      "notify_service_required": "Choose a device to notify, or set those events to “Notification in Home Assistant” instead.",
+      "notify_service_required": "Choose at least one device to notify, or set those events to “Notification in Home Assistant” instead.",
       "select_appliance_required": "Please select the controllable appliance for this sensor.",
       "select_sensor_required": "Please select a monitored power sensor.",
       "valid_budget_required": "Please enter a valid power budget (a positive integer)."

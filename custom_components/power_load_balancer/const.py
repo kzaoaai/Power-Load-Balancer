@@ -40,15 +40,16 @@ SHED_VERIFY_GRACE_SECONDS = 45
 # without leaving it suppressed forever.
 RESTORE_UNKNOWN_SIZE_FRACTION = 0.5
 
-CONF_NOTIFY_SERVICE = "notify_service"
-DEFAULT_NOTIFY_SERVICE = ""
+CONF_NOTIFY_SERVICES = "notify_services"
 
 # Read-only now: entries saved before delivery became a per-category choice
 # still carry these, and notify_channels.resolve_notify_channels translates
 # them. Nothing writes them any more -- do not offer them in the config flow.
 CONF_NOTIFY_PERSISTENT = "notify_persistent"
 CONF_NOTIFY_CATEGORIES = "notify_categories"
+CONF_NOTIFY_SERVICE = "notify_service"
 DEFAULT_NOTIFY_PERSISTENT = False
+DEFAULT_NOTIFY_SERVICE = ""
 
 # What a balancer event is about. Every event is always recorded and put on
 # the bus; these only decide which ones are worth interrupting someone for.

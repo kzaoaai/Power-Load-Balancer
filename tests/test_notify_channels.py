@@ -50,7 +50,7 @@ async def _with_channels(hass, setup_balancer, recorder, channels, **overrides: 
         recorder.calls.append(("notify", NOTIFY_SERVICE, call.data.get("message")))
 
     hass.services.async_register("notify", NOTIFY_SERVICE, _handle)
-    options = {"notify_service": NOTIFY_SERVICE, "notify_channels": channels}
+    options = {"notify_services": [NOTIFY_SERVICE], "notify_channels": channels}
     options.update(overrides)
     return await setup_balancer(**options)
 
@@ -208,7 +208,7 @@ async def test_a_push_with_no_service_configured_is_not_attempted(
         setup_balancer,
         world,
         {**ALL_NONE, "shed": "both"},
-        notify_service="",
+        notify_services=[],
     )
     await _shed_a_tank(hass, clock)
 
@@ -263,6 +263,7 @@ async def test_an_empty_category_list_is_still_honoured(
         world.calls.append(("notify", NOTIFY_SERVICE, call.data.get("message")))
 
     hass.services.async_register("notify", NOTIFY_SERVICE, _handle)
+    # notify_service (singular) is the pre-multi-select shape, on purpose.
     await setup_balancer(
         notify_persistent=True,
         notify_service=NOTIFY_SERVICE,
@@ -291,6 +292,7 @@ async def test_older_settings_keep_working(
         world.calls.append(("notify", NOTIFY_SERVICE, call.data.get("message")))
 
     hass.services.async_register("notify", NOTIFY_SERVICE, _handle)
+    # notify_service (singular) is the pre-multi-select shape, on purpose.
     await setup_balancer(
         notify_persistent=True,
         notify_service=NOTIFY_SERVICE,
@@ -319,6 +321,7 @@ async def test_older_settings_keep_their_exclusions(
         world.calls.append(("notify", NOTIFY_SERVICE, call.data.get("message")))
 
     hass.services.async_register("notify", NOTIFY_SERVICE, _handle)
+    # notify_service (singular) is the pre-multi-select shape, on purpose.
     await setup_balancer(
         notify_persistent=True,
         notify_service=NOTIFY_SERVICE,
@@ -366,7 +369,7 @@ async def test_one_line_per_category_with_its_own_picker(hass, world, setup_bala
     offered = {str(key) for key in result["data_schema"].schema}
 
     assert offered == {
-        "notify_service",
+        "notify_services",
         "notify_channel_shed",
         "notify_channel_restore",
         "notify_channel_budget",
@@ -412,7 +415,7 @@ async def test_the_picker_round_trips(hass, world, setup_balancer):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            "notify_service": NOTIFY_SERVICE,
+            "notify_services": [NOTIFY_SERVICE],
             **{f"notify_channel_{k}": v for k, v in chosen.items()},
         },
     )
@@ -422,7 +425,7 @@ async def test_the_picker_round_trips(hass, world, setup_balancer):
     await hass.async_block_till_done()
 
     assert entry.options["notify_channels"] == chosen
-    assert entry.options["notify_service"] == NOTIFY_SERVICE
+    assert entry.options["notify_services"] == [NOTIFY_SERVICE]
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
@@ -452,7 +455,7 @@ async def test_asking_for_a_push_with_no_device_is_refused(hass, world, setup_ba
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            "notify_service": "none",
+            "notify_services": [],
             "notify_channel_shed": "service",
             "notify_channel_restore": "none",
             "notify_channel_budget": "none",
@@ -475,7 +478,7 @@ async def test_a_refused_form_keeps_what_was_typed(hass, world, setup_balancer):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            "notify_service": "none",
+            "notify_services": [],
             "notify_channel_shed": "service",
             "notify_channel_restore": "none",
             "notify_channel_budget": "none",
@@ -512,7 +515,7 @@ async def test_a_typed_service_name_is_cleaned_before_it_is_trusted(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            "notify_service": "notify.  mobile_app_x  ",
+            "notify_services": ["notify.  mobile_app_x  "],
             "notify_channel_shed": "service",
             "notify_channel_restore": "none",
             "notify_channel_budget": "none",
@@ -524,7 +527,7 @@ async def test_a_typed_service_name_is_cleaned_before_it_is_trusted(
     )
     await hass.async_block_till_done()
 
-    assert entry.options["notify_service"] == "mobile_app_x"
+    assert entry.options["notify_services"] == ["mobile_app_x"]
 
 
 async def test_saving_records_the_new_shape(hass, world, setup_balancer):
@@ -538,7 +541,7 @@ async def test_saving_records_the_new_shape(hass, world, setup_balancer):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            "notify_service": "none",
+            "notify_services": [],
             "notify_channel_shed": "persistent",
             "notify_channel_restore": "none",
             "notify_channel_budget": "none",
@@ -551,5 +554,161 @@ async def test_saving_records_the_new_shape(hass, world, setup_balancer):
     await hass.async_block_till_done()
 
     assert entry.options["notify_channels"]["shed"] == "persistent"
-    assert entry.options["notify_service"] == ""
+    assert entry.options["notify_services"] == []
     assert DOMAIN
+
+
+# --- more than one device ---------------------------------------------------
+
+SECOND_SERVICE = "pushover_test"
+
+
+def _register_service(hass, recorder, name):
+    async def _handle(call):
+        recorder.calls.append(("notify", name, call.data.get("message")))
+
+    hass.services.async_register("notify", name, _handle)
+
+
+def _pushed_to(recorder, service) -> list[str]:
+    return [m for domain, s, m in recorder.calls if domain == "notify" and s == service]
+
+
+async def test_every_selected_device_gets_the_push(
+    hass, world, clock, setup_balancer, register_shed_platform
+):
+    """One event, several places -- the point of making this a list."""
+    register_shed_platform(UPSTAIRS, DOWNSTAIRS)
+    for name in (NOTIFY_SERVICE, SECOND_SERVICE):
+        _register_service(hass, world, name)
+    await setup_balancer(
+        notify_services=[NOTIFY_SERVICE, SECOND_SERVICE],
+        notify_channels={**ALL_NONE, "shed": "service"},
+    )
+
+    await _shed_a_tank(hass, clock)
+
+    assert _pushed_to(world, NOTIFY_SERVICE), "first device got nothing"
+    assert _pushed_to(world, SECOND_SERVICE), "second device got nothing"
+
+
+async def test_one_unreachable_device_does_not_silence_the_others(
+    hass, world, clock, setup_balancer, register_shed_platform
+):
+    """
+    A notifier that has gone away must not take the working one down with it.
+
+    The send path suppresses repeat failures, so a single shared "already
+    warned" flag would let one dead service mask a second one breaking later
+    -- and the failures are only ever logged, never surfaced.
+    """
+    register_shed_platform(UPSTAIRS, DOWNSTAIRS)
+    _register_service(hass, world, NOTIFY_SERVICE)
+    await setup_balancer(
+        notify_services=[NOTIFY_SERVICE, "service_that_does_not_exist"],
+        notify_channels={**ALL_NONE, "shed": "service"},
+    )
+
+    await _shed_a_tank(hass, clock)
+
+    assert _pushed_to(world, NOTIFY_SERVICE), (
+        "a missing second notifier stopped the working one from being called"
+    )
+
+
+async def test_failures_are_tracked_per_device(hass, world, setup_balancer):
+    """Warn-once must be per service, or the second failure goes unlogged."""
+    entry = await setup_balancer(
+        notify_services=["gone_a", "gone_b"],
+        notify_channels={**ALL_NONE, "problem": "service"},
+    )
+    balancer = hass.data["power_load_balancer"][entry.entry_id]
+    dispatcher = balancer._event_dispatcher
+
+    dispatcher.add_log_entry("first", category="problem")
+    await hass.async_block_till_done()
+
+    assert dispatcher._notify_failure_logged == {"gone_a", "gone_b"}, (
+        "one flag for all services would hide the second one failing"
+    )
+
+
+async def test_a_legacy_single_device_still_receives(
+    hass, world, clock, setup_balancer, register_shed_platform
+):
+    """Entries saved when this was one picker carry a bare string."""
+    register_shed_platform(UPSTAIRS, DOWNSTAIRS)
+    _register_service(hass, world, NOTIFY_SERVICE)
+    await setup_balancer(
+        notify_service=NOTIFY_SERVICE,
+        notify_channels={**ALL_NONE, "shed": "service"},
+    )
+
+    await _shed_a_tank(hass, clock)
+
+    assert _pushed_to(world, NOTIFY_SERVICE), (
+        "an upgrade dropped the one device that was configured"
+    )
+
+
+async def test_several_devices_round_trip(hass, world, setup_balancer):
+    """A multi-selection must come back as a multi-selection."""
+    entry = await setup_balancer()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"action": "edit_notifications"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "notify_services": [NOTIFY_SERVICE, SECOND_SERVICE],
+            "notify_channel_shed": "service",
+            "notify_channel_restore": "none",
+            "notify_channel_budget": "none",
+            "notify_channel_problem": "both",
+        },
+    )
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], {"action": "finish"}
+    )
+    await hass.async_block_till_done()
+
+    assert entry.options["notify_services"] == [NOTIFY_SERVICE, SECOND_SERVICE]
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"action": "edit_notifications"}
+    )
+    default = next(
+        key.default()
+        for key in result["data_schema"].schema
+        if str(key) == "notify_services"
+    )
+    assert default == [NOTIFY_SERVICE, SECOND_SERVICE], default
+
+
+async def test_an_offline_device_stays_selected(hass, world, setup_balancer):
+    """
+    Reopening the page must not quietly drop a notifier that is down.
+
+    The options come from the currently-registered notify services, so a
+    phone whose integration has not loaded yet would vanish from the list --
+    and saving from that form would drop it from the config for good.
+    """
+    entry = await setup_balancer(notify_services=["a_phone_that_is_offline"])
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"action": "edit_notifications"}
+    )
+    field = next(
+        key for key in result["data_schema"].schema if str(key) == "notify_services"
+    )
+    offered = {
+        option["value"]
+        for option in result["data_schema"].schema[field].config["options"]
+    }
+
+    assert "a_phone_that_is_offline" in offered, offered
+    assert field.default() == ["a_phone_that_is_offline"]
