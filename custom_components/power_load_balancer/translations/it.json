@@ -7,6 +7,10 @@
     "device_not_controllable": {
       "title": "Lettore multimediale non controllabile",
       "description": "Il lettore multimediale configurato {entity_id} non supporta l'accensione o lo spegnimento. Power Load Balancer non potrà controllarlo per il bilanciamento. Scegli un altro lettore multimediale o rimuovilo dalla configurazione se non deve essere gestito."
+    },
+    "entity_not_registered": {
+      "title": "L'entita configurata per il bilanciamento non esiste",
+      "description": "Power Load Balancer e configurato per usare {entity_id}, ma questa entita non esiste in questo Home Assistant. Non c'e nessun guasto: la configurazione indica qualcosa che non e presente, quindi il bilanciamento la ignora. Apri le opzioni dell'integrazione e scegli un'entita esistente per questa riga, oppure rimuovi la riga. Questo avviso non sparira da solo."
     }
   },
   "entity": {

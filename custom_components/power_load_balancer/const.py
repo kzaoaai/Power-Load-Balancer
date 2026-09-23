@@ -3,6 +3,19 @@
 DOMAIN = "power_load_balancer"
 ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE = "device_unavailable"
 ISSUE_TRANSLATION_KEY_DEVICE_NOT_CONTROLLABLE = "device_not_controllable"
+ISSUE_TRANSLATION_KEY_ENTITY_NOT_REGISTERED = "entity_not_registered"
+
+# A restart makes every entity briefly unavailable, and some integrations take
+# minutes to come back. Raising on the first miss turns an ordinary restart
+# into a repair per balanced entity, so an outage has to persist before it
+# counts as one.
+UNAVAILABLE_DEBOUNCE_SECONDS = 300
+
+# Availability is re-judged on a sweep rather than on state edges alone: a
+# dead entity sends no event to say it is still dead, and an entity that came
+# back while the listener was still being registered would otherwise stay
+# flagged forever.
+ENTITY_HEALTH_SWEEP_SECONDS = 60
 
 CONF_MAIN_POWER_SENSOR = "main_power_sensor"
 CONF_POWER_SENSORS = "power_sensors"

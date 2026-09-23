@@ -7,6 +7,10 @@
     "device_not_controllable": {
       "title": "Media player cannot be controlled",
       "description": "The configured media player {entity_id} does not support turning on or off. Power Load Balancer will not be able to control it for balancing. Choose a different media player or remove it from the configuration if it should not be managed."
+    },
+    "entity_not_registered": {
+      "title": "Entity configured for balancing does not exist",
+      "description": "Power Load Balancer is configured to use {entity_id}, but no such entity exists in this Home Assistant. Nothing is broken in the house -- the configuration names something that is not here, so balancing simply ignores it. Open the integration's options and either point this row at an entity that exists, or remove the row. This will not clear on its own."
     }
   },
   "entity": {

@@ -19,7 +19,9 @@ from homeassistant.helpers.device_registry import async_get as async_get_device_
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,
+    async_track_time_interval,
 )
+from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt
 
 if TYPE_CHECKING:
@@ -47,8 +49,10 @@ from .const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
+    ENTITY_HEALTH_SWEEP_SECONDS,
     ISSUE_TRANSLATION_KEY_DEVICE_NOT_CONTROLLABLE,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
+    ISSUE_TRANSLATION_KEY_ENTITY_NOT_REGISTERED,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
     NOTIFY_BUDGET,
     NOTIFY_PROBLEM,
@@ -56,8 +60,10 @@ from .const import (
     SUSTAINED_DISARM_GRACE_SECONDS,
     SUSTAINED_ESCALATION_DWELL_SECONDS,
     SUSTAINED_ESCALATION_WINDOW_SECONDS,
+    UNAVAILABLE_DEBOUNCE_SECONDS,
 )
 from .context_logger import ContextLogger
+from .entity_health import EntityHealth, classify_entity
 from .event_dispatcher import BalancerEventDispatcher
 from .exceptions import ConfigurationError
 from .notify_channels import (
@@ -69,6 +75,7 @@ from .power_monitor import PowerMonitor
 _LOGGER = logging.getLogger(__name__)
 AVAILABILITY_EVENT_HISTORY_SIZE = 100
 UNAVAILABLE_ENTITY_ISSUE_PREFIX = "balancing_entity_unavailable"
+NOT_REGISTERED_ENTITY_ISSUE_PREFIX = "balancing_entity_not_registered"
 NON_CONTROLLABLE_ENTITY_ISSUE_PREFIX = "balancing_entity_not_controllable"
 
 
@@ -110,6 +117,7 @@ class PowerLoadBalancer:
     _reported_sustained_failure: bool
     _below_arm_since: float | None
     _unavailable_entities: dict[str, dict[str, Any]]
+    _not_registered_entities: set[str]
     _availability_events: list[dict[str, Any]]
     _non_controllable_media_players: set[str]
     _enabled: bool
@@ -140,6 +148,9 @@ class PowerLoadBalancer:
         self._appliance_unsub = None
         self._was_over_budget = False
         self._unavailable_entities = {}
+        self._not_registered_entities = set()
+        self._health_sweep_unsub: Callable[[], None] | None = None
+        self._health_started_unsub: Callable[[], None] | None = None
         self._availability_events = []
         self._non_controllable_media_players = set()
         self._enabled = True
@@ -226,7 +237,6 @@ class PowerLoadBalancer:
 
         self._power_monitor.initialize_power_tracking()
 
-        self._initialize_availability_tracking()
         self._initialize_controllability_tracking()
         self._adopt_appliances_already_shed()
 
@@ -293,6 +303,8 @@ class PowerLoadBalancer:
                 self._handle_appliance_state_change,
             )
 
+        self._start_health_tracking()
+
         _LOGGER.debug("PowerLoadBalancer listeners registered.")
 
     def _record_availability_event(self, event: dict[str, Any]) -> None:
@@ -319,36 +331,105 @@ class PowerLoadBalancer:
             f"{sanitized_entity}"
         )
 
-    def _mark_entity_unavailable(
-        self, entity_id: str, entity_type: str, state: str | None
+    def _tracked_entities(self) -> list[tuple[str, str]]:
+        """Return every entity balancing depends on, with its role."""
+        tracked: list[tuple[str, str]] = [
+            (self._main_power_sensor_entity_id, "main_power_sensor")
+        ]
+        tracked.extend(
+            (sensor_config[CONF_ENTITY_ID], "power_sensor")
+            for sensor_config in self._monitored_sensors
+        )
+        tracked.extend(
+            (sensor_config[CONF_APPLIANCE], "appliance")
+            for sensor_config in self._monitored_sensors
+        )
+        return tracked
+
+    @callback
+    def _evaluate_entity_health(self, *_args: Any) -> None:
+        """
+        Re-judge every tracked entity and bring its repair notices into line.
+
+        Deliberately a sweep over current state rather than a reaction to
+        state edges. A dead entity sends no event to announce that it is still
+        dead, and an entity that recovered while listeners were still being
+        registered would never send the event that cleared it -- which is how
+        a repair for a healthy sensor stayed open for a day. Judging the
+        present state every time makes both cases self-correcting.
+        """
+        for entity_id, entity_type in self._tracked_entities():
+            if not isinstance(entity_id, str) or not entity_id:
+                continue
+            health, state_value = classify_entity(self.hass, entity_id)
+            self._apply_entity_health(entity_id, entity_type, health, state_value)
+
+    def _apply_entity_health(
+        self,
+        entity_id: str,
+        entity_type: str,
+        health: EntityHealth,
+        state_value: str | None,
     ) -> None:
-        """Track when an entity becomes unavailable for balancing."""
-        now_iso = dt.utcnow().isoformat(timespec="seconds")
-        if entity_id in self._unavailable_entities:
-            self._unavailable_entities[entity_id]["last_seen"] = now_iso
-            self._unavailable_entities[entity_id]["state"] = state
+        """Raise, keep or withdraw the repair notices for one entity."""
+        if health is EntityHealth.MISSING:
+            self._clear_unavailable_issue(entity_id, entity_type, state_value)
+            self._report_not_registered(entity_id, entity_type)
             return
 
-        unavailable_info = {
-            "entity": entity_id,
-            "entity_type": entity_type,
-            "state": state,
-            "first_seen": now_iso,
-            "last_seen": now_iso,
-        }
-        self._unavailable_entities[entity_id] = unavailable_info
+        self._clear_not_registered_issue(entity_id)
 
-        self._record_availability_event(
-            {
-                "timestamp": now_iso,
-                "event": "became_unavailable",
+        if health in (
+            EntityHealth.OK,
+            EntityHealth.DISABLED,
+            EntityHealth.AWAITING_DISABLED_ENTRY,
+        ):
+            # Both disabled shapes are somebody's decision -- seasonal heaters
+            # get switched off every summer here -- and both come back when
+            # the entry is re-enabled, so neither is raised as a fault.
+            self._clear_unavailable_issue(entity_id, entity_type, state_value)
+            return
+
+        self._report_unavailable(entity_id, entity_type, state_value)
+
+    def _report_unavailable(
+        self, entity_id: str, entity_type: str, state_value: str | None
+    ) -> None:
+        """Track an unavailable entity, raising a repair once it persists."""
+        now_iso = dt.utcnow().isoformat(timespec="seconds")
+        tracked = self._unavailable_entities.get(entity_id)
+
+        if tracked is None:
+            tracked = {
                 "entity": entity_id,
                 "entity_type": entity_type,
-                "state": state,
-                "reason": "entity unavailable for balancing",
+                "state": state_value,
+                "first_seen": now_iso,
+                "last_seen": now_iso,
+                "since": monotonic(),
+                "reported": False,
             }
-        )
+            self._unavailable_entities[entity_id] = tracked
+            self._record_availability_event(
+                {
+                    "timestamp": now_iso,
+                    "event": "became_unavailable",
+                    "entity": entity_id,
+                    "entity_type": entity_type,
+                    "state": state_value,
+                    "reason": "entity unavailable for balancing",
+                }
+            )
+        else:
+            tracked["last_seen"] = now_iso
+            tracked["state"] = state_value
 
+        if tracked.get("reported"):
+            return
+        if monotonic() - float(tracked["since"]) < UNAVAILABLE_DEBOUNCE_SECONDS:
+            return
+
+        tracked["reported"] = True
         ir.async_create_issue(
             self.hass,
             DOMAIN,
@@ -358,76 +439,121 @@ class PowerLoadBalancer:
             translation_key=ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
             translation_placeholders={"entity_id": entity_id},
         )
-
         _LOGGER.warning(
-            "Entity %s became unavailable for balancing (type=%s, state=%s)",
+            "Entity %s has been unavailable for balancing for over %s s "
+            "(type=%s, state=%s)",
             entity_id,
+            UNAVAILABLE_DEBOUNCE_SECONDS,
             entity_type,
-            state,
+            state_value,
         )
 
-    def _mark_entity_available(
-        self, entity_id: str, entity_type: str, state: str | None
+    def _clear_unavailable_issue(
+        self, entity_id: str, entity_type: str, state_value: str | None
     ) -> None:
-        """Track when an entity becomes available again for balancing."""
-        unavailable_info = self._unavailable_entities.pop(entity_id, None)
-        if unavailable_info is None:
+        """Withdraw an unavailability notice once the entity is usable again."""
+        tracked = self._unavailable_entities.pop(entity_id, None)
+        if tracked is None:
             return
 
-        now_iso = dt.utcnow().isoformat(timespec="seconds")
         self._record_availability_event(
             {
-                "timestamp": now_iso,
+                "timestamp": dt.utcnow().isoformat(timespec="seconds"),
                 "event": "restored",
                 "entity": entity_id,
                 "entity_type": entity_type,
-                "state": state,
-                "unavailable_since": unavailable_info.get("first_seen"),
+                "state": state_value,
+                "unavailable_since": tracked.get("first_seen"),
                 "reason": "entity restored for balancing",
             }
         )
-
         ir.async_delete_issue(
+            self.hass, DOMAIN, self._get_unavailable_issue_id(entity_id)
+        )
+        if tracked.get("reported"):
+            _LOGGER.info(
+                "Entity %s is available again for balancing (type=%s, state=%s)",
+                entity_id,
+                entity_type,
+                state_value,
+            )
+
+    def _report_not_registered(self, entity_id: str, entity_type: str) -> None:
+        """Flag an entity that the configuration names but that does not exist."""
+        if entity_id in self._not_registered_entities:
+            return
+        self._not_registered_entities.add(entity_id)
+        ir.async_create_issue(
             self.hass,
             DOMAIN,
-            self._get_unavailable_issue_id(entity_id),
+            self._get_not_registered_issue_id(entity_id),
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_TRANSLATION_KEY_ENTITY_NOT_REGISTERED,
+            translation_placeholders={"entity_id": entity_id},
         )
-
-        _LOGGER.info(
-            "Entity %s is available again for balancing (type=%s, state=%s)",
+        _LOGGER.warning(
+            "Entity %s is configured for balancing (type=%s) but is not in the "
+            "entity registry; balancing cannot use it until the configuration "
+            "names an entity that exists",
             entity_id,
             entity_type,
-            state,
         )
 
-    def _initialize_availability_tracking(self) -> None:
-        """Capture initial availability of all entities relevant to balancing."""
-        tracked_entities: list[tuple[str, str]] = [
-            (self._main_power_sensor_entity_id, "main_power_sensor"),
-        ]
-        tracked_entities.extend(
-            (sensor_config[CONF_ENTITY_ID], "power_sensor")
-            for sensor_config in self._monitored_sensors
-        )
-        tracked_entities.extend(
-            (sensor_config[CONF_APPLIANCE], "appliance")
-            for sensor_config in self._monitored_sensors
+    def _clear_not_registered_issue(self, entity_id: str) -> None:
+        """Withdraw a not-registered notice once the entity exists."""
+        if entity_id not in self._not_registered_entities:
+            return
+        self._not_registered_entities.discard(entity_id)
+        ir.async_delete_issue(
+            self.hass, DOMAIN, self._get_not_registered_issue_id(entity_id)
         )
 
-        for entity_id, entity_type in tracked_entities:
-            state = self.hass.states.get(entity_id)
-            state_value = state.state if state is not None else None
-            if state is None or state_value in ("unknown", "unavailable"):
-                self._mark_entity_unavailable(entity_id, entity_type, state_value)
+    def _get_not_registered_issue_id(self, entity_id: str) -> str:
+        """Return a stable issue ID for an entity that does not exist."""
+        sanitized_entity = entity_id.replace(".", "_")
+        return (
+            f"{NOT_REGISTERED_ENTITY_ISSUE_PREFIX}_{self.entry.entry_id}_"
+            f"{sanitized_entity}"
+        )
+
+    def _start_health_tracking(self) -> None:
+        """
+        Begin judging entity availability, once Home Assistant is up.
+
+        Nothing is judged during startup: every entity is briefly unavailable
+        then, and integrations come back in their own time, so evaluating
+        early manufactures a repair for each balanced entity that happens to
+        be slow. The sweep then keeps running, because an entity that stays
+        down never sends another event.
+        """
+
+        @callback
+        def _begin(_event: Any = None) -> None:
+            self._evaluate_entity_health()
+            self._health_sweep_unsub = async_track_time_interval(
+                self.hass,
+                self._evaluate_entity_health,
+                timedelta(seconds=ENTITY_HEALTH_SWEEP_SECONDS),
+            )
+
+        self._health_started_unsub = async_at_started(self.hass, _begin)
 
     def _clear_unavailable_entity_issues(self) -> None:
-        """Delete all outstanding Repairs issues for unavailable entities."""
+        """Delete all outstanding Repairs issues this balancer raised."""
         for entity_id in list(self._unavailable_entities):
             ir.async_delete_issue(
                 self.hass,
                 DOMAIN,
                 self._get_unavailable_issue_id(entity_id),
             )
+        for entity_id in list(self._not_registered_entities):
+            ir.async_delete_issue(
+                self.hass,
+                DOMAIN,
+                self._get_not_registered_issue_id(entity_id),
+            )
+        self._not_registered_entities.clear()
 
     def _clear_non_controllable_entity_issues(self) -> None:
         """Delete all outstanding Repairs issues for non-controllable entities."""
@@ -523,7 +649,13 @@ class PowerLoadBalancer:
             self._clear_unavailable_entity_issues()
             self._clear_non_controllable_entity_issues()
             self._unavailable_entities.clear()
+            self._not_registered_entities.clear()
             self._availability_events.clear()
+            for unsub in (self._health_sweep_unsub, self._health_started_unsub):
+                if unsub is not None:
+                    unsub()
+            self._health_sweep_unsub = None
+            self._health_started_unsub = None
             self._non_controllable_media_players.clear()
             self._event_log_sensor = None
             self._pending_sensor = None
@@ -693,18 +825,9 @@ class PowerLoadBalancer:
             event: The state change event from Home Assistant.
 
         """
-        entity_id = event.data.get("entity_id") if hasattr(event, "data") else None
-        new_state = event.data.get("new_state") if hasattr(event, "data") else None
-
-        if isinstance(entity_id, str):
-            is_main_sensor = entity_id == self._main_power_sensor_entity_id
-            entity_type = "main_power_sensor" if is_main_sensor else "power_sensor"
-            state_value = new_state.state if new_state is not None else None
-
-            if new_state is None or state_value in ("unknown", "unavailable"):
-                self._mark_entity_unavailable(entity_id, entity_type, state_value)
-            else:
-                self._mark_entity_available(entity_id, entity_type, state_value)
+        # Which entity moved does not matter: the sweep re-judges all of them,
+        # which is what makes a recovery nobody reported still get noticed.
+        self._evaluate_entity_health()
 
         await self._power_monitor.handle_power_sensor_state_change(
             event, self.async_check_and_balance
@@ -718,13 +841,12 @@ class PowerLoadBalancer:
         state_value = new_state.state if new_state is not None else None
 
         if new_state is None or state_value in ("unknown", "unavailable"):
-            if isinstance(entity_id, str):
-                self._mark_entity_unavailable(entity_id, "appliance", state_value)
+            self._evaluate_entity_health()
             _LOGGER.debug("Ignoring invalid state for appliance %s", entity_id)
             return
 
         if isinstance(entity_id, str):
-            self._mark_entity_available(entity_id, "appliance", state_value)
+            self._evaluate_entity_health()
             self._update_media_player_controllability(entity_id, new_state)
 
         _LOGGER.debug(
