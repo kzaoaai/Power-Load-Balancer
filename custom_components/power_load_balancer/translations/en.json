@@ -63,13 +63,6 @@
   "config": {
     "step": {
       "user": {
-        "menu": {
-          "edit_main_sensor": "Configure Main Sensor",
-          "add_sensor": "Add New Monitored Sensor",
-          "edit_sensor_{i}": "Edit: {sensor_name}",
-          "finish": "Finish Configuration",
-          "edit_notifications": "Notification Settings"
-        },
         "data": {
           "action": "Action"
         },
@@ -77,13 +70,6 @@
         "title": "Power Load Balancer Setup"
       },
       "main_config": {
-        "menu": {
-          "edit_main_sensor": "Configure Main Sensor",
-          "add_sensor": "Add New Monitored Sensor",
-          "edit_sensor_{i}": "Edit: {sensor_name}",
-          "finish": "Finish Configuration",
-          "edit_notifications": "Notification Settings"
-        },
         "data": {
           "action": "Action"
         },
@@ -165,13 +151,6 @@
         "title": "Edit Main Settings"
       },
       "sensor_menu": {
-        "menu": {
-          "edit_main_sensor": "Edit Main Sensor Settings",
-          "add_sensor": "Add New Monitored Sensor",
-          "edit_sensor_{i}": "Edit: {sensor_name}",
-          "finish": "Save Configuration",
-          "edit_notifications": "Notification Settings"
-        },
         "data": {
           "action": "Action"
         },

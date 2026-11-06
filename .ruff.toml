@@ -8,6 +8,7 @@ select = [
 ]
 
 ignore = [
+    "CPY001",
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
     "D203", # no-blank-line-before-class (incompatible with formatter)
     "D212", # multi-line-summary-first-line (incompatible with formatter)
@@ -40,6 +41,7 @@ ignore = [
     "EM101",
     "EM102",
 ]
+"custom_components/power_load_balancer/context_logger.py" = ["LOG004"]
 
 [lint.flake8-pytest-style]
 fixture-parentheses = false
