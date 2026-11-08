@@ -55,7 +55,7 @@ def _offered_defaults(schema) -> dict:
 
 
 def _appliance(entry, entity_id: str) -> dict:
-    for rung in entry.options["power_sensors"]:
+    for rung in entry.data["power_sensors"]:
         if rung["appliance"] == entity_id:
             return rung
     message = f"{entity_id} missing from the saved ladder"
@@ -232,4 +232,4 @@ async def test_the_other_appliances_are_untouched(hass, world, setup_balancer):
     downstairs = _appliance(entry, DOWNSTAIRS)
     assert downstairs["entity_id"] == DOWNSTAIRS_POWER
     assert downstairs["importance"] == 2
-    assert len(entry.options["power_sensors"]) == 2
+    assert len(entry.data["power_sensors"]) == 2

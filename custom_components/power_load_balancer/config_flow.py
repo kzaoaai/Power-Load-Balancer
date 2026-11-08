@@ -545,6 +545,7 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
     """
 
     VERSION: int = 1
+    MINOR_VERSION: int = 2
     _config_data: dict[str, Any]
 
     async def async_step_user(
@@ -937,11 +938,15 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
                         ),
                     },
                 )
+                # The configuration lives in data alone (see
+                # async_migrate_entry); options stay empty. One update, one
+                # reload.
                 self.hass.config_entries.async_update_entry(
                     self._config_entry,
-                    options=deepcopy(self._config_data),
+                    data=deepcopy(self._config_data),
+                    options={},
                 )
-                return self.async_create_entry(title="", data=self._config_data)
+                return self.async_create_entry(title="", data={})
             if str(action).startswith("edit_sensor_"):
                 try:
                     sensor_index = int(str(action).replace("edit_sensor_", ""))

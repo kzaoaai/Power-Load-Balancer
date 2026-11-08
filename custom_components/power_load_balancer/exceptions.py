@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.exceptions import HomeAssistantError
 
-class PowerLoadBalancerError(Exception):
-    """Base exception for Power Load Balancer integration."""
+
+class PowerLoadBalancerError(HomeAssistantError):
+    """
+    Base exception for Power Load Balancer integration.
+
+    A HomeAssistantError, so a failed service call shows its own message in
+    the UI rather than "Unknown error".
+    """
 
     def __init__(
         self,

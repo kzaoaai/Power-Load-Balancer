@@ -11,12 +11,18 @@ import logging
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
 
 from .const import (
     ATTR_ENTITY_ID,
     ATTR_REASON,
+    CONF_NOTIFY_CATEGORIES,
+    CONF_NOTIFY_CHANNELS,
+    CONF_NOTIFY_PERSISTENT,
+    CONF_NOTIFY_SERVICE,
+    CONF_NOTIFY_SERVICES,
     DOMAIN,
     SERVICE_TURN_OFF_APPLIANCE,
     SERVICE_TURN_ON_APPLIANCE,
@@ -25,6 +31,7 @@ from .const import (
 )
 from .context_logger import ContextLogger
 from .exceptions import ConfigurationError, PowerLoadBalancerError
+from .notify_channels import resolve_notify_channels, resolve_notify_services
 from .power_balancer import PowerLoadBalancer
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,6 +51,37 @@ SERVICE_TURN_ON_APPLIANCE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_REASON, default=""): cv.string,
     }
 )
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """
+    Bring an entry's stored configuration to the current shape.
+
+    1.2: the configuration lived in data until the first options save, then
+    in a full copy in options, leaving data stale underneath and both written
+    on every budget change. It now lives in data alone, and the notification
+    settings are stored in their current shape, without the legacy keys they
+    were once translated from at every load.
+    """
+    if entry.version > 1:
+        return False
+
+    if entry.minor_version < 2:  # noqa: PLR2004
+        merged = {**entry.data, **entry.options}
+        merged[CONF_NOTIFY_SERVICES] = resolve_notify_services(merged)
+        merged[CONF_NOTIFY_CHANNELS] = resolve_notify_channels(merged)
+        for legacy in (
+            CONF_NOTIFY_PERSISTENT,
+            CONF_NOTIFY_SERVICE,
+            CONF_NOTIFY_CATEGORIES,
+        ):
+            merged.pop(legacy, None)
+        hass.config_entries.async_update_entry(
+            entry, data=merged, options={}, minor_version=2
+        )
+        _LOGGER.info("Migrated Power Load Balancer entry to version 1.2")
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -147,6 +185,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             if not hass.data[DOMAIN]:
                 del hass.data[DOMAIN]
+                # The last balancer is gone; services that could only fail
+                # would otherwise stay registered until a restart.
+                hass.services.async_remove(DOMAIN, SERVICE_TURN_OFF_APPLIANCE)
+                hass.services.async_remove(DOMAIN, SERVICE_TURN_ON_APPLIANCE)
 
         if unload_ok:
             logger.info("Power Load Balancer integration unloaded successfully")
@@ -232,10 +274,11 @@ async def _handle_turn_off_appliance_service(call: ServiceCall) -> None:
                 entity_id, reason, call.context
             )
         else:
-            logger.warning(
-                "No Power Load Balancer instance found for entity", entity_id=entity_id
-            )
+            msg = f"{entity_id} is not managed by any Power Load Balancer"
+            raise ServiceValidationError(msg)  # noqa: TRY301
 
+    except ServiceValidationError:
+        raise
     except Exception:
         logger.exception("Error handling turn_off_appliance service call")
         raise
@@ -263,10 +306,11 @@ async def _handle_turn_on_appliance_service(call: ServiceCall) -> None:
                 entity_id, reason, call.context
             )
         else:
-            logger.warning(
-                "No Power Load Balancer instance found for entity", entity_id=entity_id
-            )
+            msg = f"{entity_id} is not managed by any Power Load Balancer"
+            raise ServiceValidationError(msg)  # noqa: TRY301
 
+    except ServiceValidationError:
+        raise
     except Exception:
         logger.exception("Error handling turn_on_appliance service call")
         raise

@@ -13,6 +13,11 @@ A Home Assistant custom integration to prevent exceeding your household's power 
 -   Optional "assumed power on" value for appliances to react quickly to potential overloads before sensor data updates.
 -   Provides a control switch entity to easily enable or disable the load balancing function.
 -   Includes a sensor entity to log balancing events (e.g., which appliance was turned off and why).
+-   **Sustained-load shedding**: sheds one appliance at a time once the load has stayed above a set percentage of the budget for a set time, on apparent power (VA) as well as watts.
+-   **Water heaters**: `water_heater` entities are supported; a `generic_water_heater` tank is shed through that integration's own shed and release services, so the shed is not mistaken for a manual change.
+-   **Restart-safe**: what the balancer has shed, and the mode to give back, is saved and taken back after a restart or reload.
+-   **Pending actions sensor**: shows what the balancer is about to shed or restore, and when.
+-   **Notifications**: a delivery channel per event category (shed, restore, budget, problem).
 -   **Custom Services**: Enhanced `turn_on_appliance` and `turn_off_appliance` services with proper logging attribution.
 -   **Enhanced Logging**: Track all balancing actions with detailed event logs and clear attribution in HA logs.
 
@@ -22,7 +27,7 @@ Before installing, ensure you have:
 
 -   Home Assistant. The current development environment targets **Home Assistant 2026.11.0** on **Python 3.14.2 or later**.
 -   Power sensors integrated into Home Assistant that provide real-time power consumption (in Watts).
--   Controllable switch, light, climate, or media_player entities integrated into Home Assistant for the appliances you want to manage.
+-   Controllable switch, light, climate, water_heater, or media_player entities integrated into Home Assistant for the appliances you want to manage.
 -   Use the built-in **Marketplace** on Home Assistant **2026.11 or later**, or **HACS (Home Assistant Community Store)** on earlier Home Assistant versions, for installation and updates.
 
 ## Installation
@@ -32,7 +37,7 @@ Before installing, ensure you have:
 Home Assistant 2026.11 includes the [Marketplace](https://www.home-assistant.io/integrations/marketplace/), which replaces HACS. No separate store installation is needed.
 
 1.  As an administrator, open **Settings -> Marketplace** and accept the community-content notice when prompted.
-2.  Search for "Power Load Balancer". If it is not listed, select **Add from link** in the upper-right corner and enter `https://github.com/chicco-carone/Power-Load-Balancer`.
+2.  Search for "Power Load Balancer". If it is not listed, select **Add from link** in the upper-right corner and enter `https://github.com/kzaoaai/Power-Load-Balancer`.
 3.  Connect your GitHub account if prompted. If asked for a content type, select **Integration**, then select **Add**.
 4.  Open the repository page and select **Install**, review the version, and confirm.
 5.  Follow any restart prompt, then continue with [Configuration](#configuration).
@@ -43,11 +48,11 @@ If you already installed the integration through HACS, Home Assistant migrates t
 
 For older Home Assistant installations, use HACS and select a release compatible with your Home Assistant version. HACS is replaced by the built-in Marketplace on 2026.11 and later.
 
-[![Open this repository in HACS or Marketplace](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=chicco-carone&repository=Power-Load-Balancer&category=integration)
+[![Open this repository in HACS or Marketplace](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=kzaoaai&repository=Power-Load-Balancer&category=integration)
 
 1.  In Home Assistant, navigate to **HACS -> Integrations**.
 2.  Click the three dots in the top right corner and select **"Custom repositories"**.
-3.  Add this URL `https://github.com/chicco-carone/Power-Load-Balancer`.
+3.  Add this URL `https://github.com/kzaoaai/Power-Load-Balancer`.
 4.  Select the category **"Integration"**.
 5.  Click **"Add"**.
 6.  Search for "Power Load Balancer" in the HACS Integrations list.
@@ -55,6 +60,8 @@ For older Home Assistant installations, use HACS and select a release compatible
 8.  Restart Home Assistant.
 
 ## Configuration
+
+The power budget is in the same unit as the main power sensor: watts for a W sensor, volt-amperes for a VA (apparent power) sensor.
 
 After installation (and a restart if requested):
 
@@ -71,7 +78,7 @@ After installation (and a restart if requested):
         *   Optionally provide a **Name** for this configuration (defaults to the sensor's friendly name).
         *   Set the **Importance** (1 being highest priority to keep on, 10 being lowest priority).
         *   Check the **Last Resort** box if this appliance should only be turned off as a last resort.
-        *   Select the **Controllable Appliance** (switch, light, climate, or media_player entity) associated with this sensor.
+        *   Select the **Controllable Appliance** (switch, light, climate, water_heater, or media_player entity) associated with this sensor.
         *   Optionally override the **Cooldown Time** for this specific appliance.
     *   You can add multiple monitored sensors and their associated appliances.
     *   You can remove configured sensors from the main configuration screen.

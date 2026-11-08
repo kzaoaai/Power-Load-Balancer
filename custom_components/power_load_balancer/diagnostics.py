@@ -20,9 +20,12 @@ TO_REDACT = {
     CONF_MAIN_POWER_SENSOR,
     CONF_POWER_SENSORS,
     "context_id",
+    "entity",
     "entry_id",
     "main_power_sensor_entity_id",
     "monitored_sensors",
+    "notify_service",
+    "notify_services",
 }
 
 

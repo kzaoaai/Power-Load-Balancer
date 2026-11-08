@@ -117,7 +117,7 @@ async def test_options_change_does_not_strand_a_shed_appliance(
 
     hass.states.async_set(UPSTAIRS_POWER, "0", {"unit_of_measurement": "W"})
     hass.config_entries.async_update_entry(
-        entry, options={**entry.options, "power_budget_watt": 6500}
+        entry, data={**entry.data, "power_budget_watt": 6500}
     )
     await hass.async_block_till_done()
     world.clear()

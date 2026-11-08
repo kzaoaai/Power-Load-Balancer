@@ -69,17 +69,10 @@
         "description": "Welcome to the Power Load Balancer setup. Configure your main power sensor and add monitored power sensors with their corresponding appliances.",
         "title": "Power Load Balancer Setup"
       },
-      "main_config": {
-        "data": {
-          "action": "Action"
-        },
-        "description": "Configure the main power sensor and the total power budget.",
-        "title": "Power Load Balancer Configuration"
-      },
       "edit_main_sensor": {
         "data": {
           "main_power_sensor": "Main Power Sensor",
-          "power_budget_watt": "Power Budget (Watt)",
+          "power_budget_watt": "Power Budget (W or VA, same unit as the main power sensor)",
           "cooldown_seconds": "Cooldown Time (seconds)",
           "sustained_shedding_enabled": "Enable sustained-load shedding",
           "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
@@ -144,8 +137,7 @@
       "init": {
         "data": {
           "main_power_sensor": "Main Power Sensor",
-          "power_budget_watt": "Power Budget (Watt)",
-          "cooldown_seconds": "Cooldown Time (seconds)"
+          "power_budget_watt": "Power Budget (W or VA, same unit as the main power sensor)"
         },
         "description": "Edit the main power sensor, power budget, and cooldown settings.",
         "title": "Edit Main Settings"
@@ -187,7 +179,7 @@
       "edit_main_sensor": {
         "data": {
           "main_power_sensor": "Main Power Sensor",
-          "power_budget_watt": "Power Budget (Watt)",
+          "power_budget_watt": "Power Budget (W or VA, same unit as the main power sensor)",
           "cooldown_seconds": "Cooldown Time (seconds)",
           "sustained_shedding_enabled": "Enable sustained-load shedding",
           "sustained_threshold_percent": "Sustained-load threshold (% of budget)",

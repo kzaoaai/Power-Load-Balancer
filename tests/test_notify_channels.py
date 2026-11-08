@@ -424,8 +424,8 @@ async def test_the_picker_round_trips(hass, world, setup_balancer):
     )
     await hass.async_block_till_done()
 
-    assert entry.options["notify_channels"] == chosen
-    assert entry.options["notify_services"] == [NOTIFY_SERVICE]
+    assert entry.data["notify_channels"] == chosen
+    assert entry.data["notify_services"] == [NOTIFY_SERVICE]
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
@@ -527,7 +527,7 @@ async def test_a_typed_service_name_is_cleaned_before_it_is_trusted(
     )
     await hass.async_block_till_done()
 
-    assert entry.options["notify_services"] == ["mobile_app_x"]
+    assert entry.data["notify_services"] == ["mobile_app_x"]
 
 
 async def test_saving_records_the_new_shape(hass, world, setup_balancer):
@@ -553,8 +553,8 @@ async def test_saving_records_the_new_shape(hass, world, setup_balancer):
     )
     await hass.async_block_till_done()
 
-    assert entry.options["notify_channels"]["shed"] == "persistent"
-    assert entry.options["notify_services"] == []
+    assert entry.data["notify_channels"]["shed"] == "persistent"
+    assert entry.data["notify_services"] == []
     assert DOMAIN
 
 
@@ -674,7 +674,7 @@ async def test_several_devices_round_trip(hass, world, setup_balancer):
     )
     await hass.async_block_till_done()
 
-    assert entry.options["notify_services"] == [NOTIFY_SERVICE, SECOND_SERVICE]
+    assert entry.data["notify_services"] == [NOTIFY_SERVICE, SECOND_SERVICE]
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(

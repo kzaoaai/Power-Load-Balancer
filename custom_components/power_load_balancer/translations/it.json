@@ -69,17 +69,10 @@
         "description": "Benvenuto nella configurazione di Power Load Balancer. Configura il sensore di potenza principale e aggiungi sensori di potenza monitorati con i relativi dispositivi.",
         "title": "Configurazione Power Load Balancer"
       },
-      "main_config": {
-        "data": {
-          "action": "Azione"
-        },
-        "description": "Configura il sensore di potenza principale e il budget totale di potenza.",
-        "title": "Configurazione Power Load Balancer"
-      },
       "edit_main_sensor": {
         "data": {
           "main_power_sensor": "Sensore di potenza principale",
-          "power_budget_watt": "Budget di potenza (Watt)",
+          "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)",
           "cooldown_seconds": "Tempo di attesa (secondi)",
           "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
           "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
@@ -144,8 +137,7 @@
       "init": {
         "data": {
           "main_power_sensor": "Sensore di potenza principale",
-          "power_budget_watt": "Budget di potenza (Watt)",
-          "cooldown_seconds": "Tempo di attesa (secondi)"
+          "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)"
         },
         "description": "Modifica il sensore di potenza principale, il budget di potenza e le impostazioni di attesa.",
         "title": "Modifica impostazioni principali"
@@ -187,7 +179,7 @@
       "edit_main_sensor": {
         "data": {
           "main_power_sensor": "Sensore di potenza principale",
-          "power_budget_watt": "Budget di potenza (Watt)",
+          "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)",
           "cooldown_seconds": "Tempo di attesa (secondi)",
           "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
           "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",

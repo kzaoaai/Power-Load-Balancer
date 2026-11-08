@@ -86,12 +86,13 @@ class PowerBudgetNumber(NumberEntity):
         # Set skip_reload so the update listener doesn't trigger a full reload
         self._balancer.skip_reload = True
 
-        # Persist to config entry so the value survives restarts
+        # Persist to config entry so the value survives restarts. The
+        # configuration lives in data; options are only touched if an entry
+        # not yet migrated still carries the budget there.
         new_data = {**self._config_entry.data, CONF_POWER_BUDGET_WATT: new_budget}
-        new_options = {
-            **self._config_entry.options,
-            CONF_POWER_BUDGET_WATT: new_budget,
-        }
+        new_options = dict(self._config_entry.options)
+        if CONF_POWER_BUDGET_WATT in new_options:
+            new_options[CONF_POWER_BUDGET_WATT] = new_budget
         self.hass.config_entries.async_update_entry(
             self._config_entry,
             data=new_data,
