@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (102 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (110 tests). It needs `.venv` on Python
   3.12, built from `requirements_test.txt` as `AGENTS.md` describes.
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 25
   findings that predate the fork's current work, 16 of them in
@@ -60,10 +60,11 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: v1.3.0, which is `400b6ab` (upstream v1.2.1 merged,
-  housekeeping only). Production has it on disk but runs the previous fork
-  code (`2805221`) until its next restart; only the manifest and
-  translations differ.
+- Latest release: v1.3.1 (review fixes of 2026-11-08: failed-but-landed
+  sheds kept, own restores not vetoed, sheds remembered across restarts in
+  a per-entry Store, reconnects not vetoed, shed-by-mode restored by mode,
+  plus smaller hardening). Production picks it up only after it is
+  installed from the update entity and Home Assistant restarts.
 - The inherited GitHub Actions have never run on the fork: GitHub holds
   workflows on a fork until they are enabled in its Actions tab.
   `format.yml` commits ruff formatting straight to `main` on every push,

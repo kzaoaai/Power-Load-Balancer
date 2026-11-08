@@ -7,6 +7,7 @@ This module provides validation functions for entities and power values.
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Any
 
 from .exceptions import (
@@ -71,6 +72,11 @@ def validate_power_value(value: Any, entity_id: str) -> float:
 
     try:
         power = float(value)
+        if not math.isfinite(power):
+            raise PowerSensorError(
+                message=f"Power value is not a finite number for entity {entity_id}",
+                details={"entity_id": entity_id, "value": value},
+            )
         if power < 0:
             raise PowerSensorError(
                 message=f"Power value cannot be negative for entity {entity_id}",

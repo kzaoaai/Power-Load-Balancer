@@ -24,6 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_LOG_SIZE = 50
 MAX_LOG_ENTRY_LENGTH = 300
+MAX_STATE_LENGTH = 255
 
 
 async def async_setup_entry(
@@ -62,6 +63,7 @@ class PowerBalancerPendingSensor(SensorEntity):
     """
 
     _attr_has_entity_name = True
+    _attr_should_poll = False
     _attr_translation_key = "pending_actions"
     _attr_icon = "mdi:timer-sand"
     _attr_native_unit_of_measurement = "actions"
@@ -112,7 +114,10 @@ class PowerBalancerPendingSensor(SensorEntity):
     @callback
     def refresh(self) -> None:
         """Recompute the report and publish it if anything changed."""
-        self._report = self._balancer.get_pending_actions()
+        report = self._balancer.get_pending_actions()
+        if report == self._report:
+            return
+        self._report = report
         if self.hass is not None:
             self.async_write_ha_state()
 
@@ -126,6 +131,11 @@ class PowerBalancerLogSensor(SensorEntity, RestoreEntity):
     The last state and event history are restored across Home Assistant
     restarts so an incident is still diagnosable after a reboot.
     """
+
+    _attr_should_poll = False
+    # The log is kept across restarts by RestoreEntity, not the recorder, and
+    # re-recording the whole list on every entry only grows the database.
+    _unrecorded_attributes = frozenset({"events"})
 
     _balancer: PowerLoadBalancer
     _attr_name: str
@@ -192,14 +202,16 @@ class PowerBalancerLogSensor(SensorEntity, RestoreEntity):
         """
         timestamp = dt.utcnow().isoformat(timespec="seconds")
         log_entry = f"{timestamp} - {message}"[:MAX_LOG_ENTRY_LENGTH]
-        self._attr_extra_state_attributes["events"].append(log_entry)
+        # A new list each time: the current state holds a reference to the
+        # old one, and appending in place would rewrite it underneath.
+        self._attr_extra_state_attributes["events"] = [
+            *self._attr_extra_state_attributes["events"],
+            log_entry,
+        ][-MAX_LOG_SIZE:]
 
-        if len(self._attr_extra_state_attributes["events"]) > MAX_LOG_SIZE:
-            self._attr_extra_state_attributes["events"] = (
-                self._attr_extra_state_attributes["events"][-MAX_LOG_SIZE:]
-            )
-
-        self._attr_native_value = message
+        # Home Assistant rejects a state over 255 characters and falls back to
+        # "unknown" with no attributes, which would drop the whole log.
+        self._attr_native_value = message[:MAX_STATE_LENGTH]
         _LOGGER.debug("Power balancer event logged: %s", message)
         self.async_write_ha_state()
 

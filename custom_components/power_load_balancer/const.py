@@ -46,6 +46,7 @@ SUSTAINED_ESCALATION_WINDOW_SECONDS = 180
 SUSTAINED_ESCALATION_DWELL_SECONDS = 15
 SUSTAINED_DISARM_GRACE_SECONDS = 15
 SHED_VERIFY_GRACE_SECONDS = 45
+POWER_TICK_SWEEP_SECONDS = 10
 
 # An appliance adopted at startup was shed before this process began, so its
 # power sensor reads zero and there is no way to size what restoring it costs.
@@ -129,3 +130,8 @@ ATTR_REASON = "reason"
 
 DEVICE_MANUFACTURER = "Power Load Balancer"
 DEVICE_MODEL = "Power Load Balancer"
+
+
+def appliance_control_issue_id(entity_id: str) -> str:
+    """Return the Repairs id raised when controlling an appliance finds it gone."""
+    return f"{entity_id}_unavailable"

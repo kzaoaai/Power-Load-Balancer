@@ -35,6 +35,7 @@ async def async_setup_entry(
 class PowerBudgetNumber(NumberEntity):
     """Number entity to adjust the power budget at runtime."""
 
+    _attr_should_poll = False
     _attr_has_entity_name = True
     _attr_translation_key = "power_budget"
     _attr_icon = "mdi:flash"

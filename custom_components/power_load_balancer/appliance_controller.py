@@ -31,6 +31,7 @@ from .const import (
     OWN_RESTORE_GRACE_SECONDS,
     SHED_AWARE_PLATFORMS,
     SHED_STORE_SAVE_DELAY_SECONDS,
+    appliance_control_issue_id,
 )
 from .context_logger import ContextLogger
 from .exceptions import (
@@ -220,6 +221,12 @@ class ApplianceController:
             "reason": reason or "Turned off by Power Load Balancer",
         }
         self._schedule_save()
+
+    def restart_cooldown(self, entity_id: str) -> None:
+        """Hold an appliance off for another cooldown before the next attempt."""
+        info = self._balanced_off_appliances.get(entity_id)
+        if info is not None:
+            info["timestamp"] = monotonic()
 
     def get_balanced_off_age(self, entity_id: str) -> float | None:
         """Return seconds since an appliance was marked balanced off."""
@@ -621,7 +628,14 @@ class ApplianceController:
         domain = entity_id.split(".", maxsplit=1)[0]
 
         shed_api = self._get_shed_api(entity_id)
-        if shed_api is not None:
+        if shed_api is not None and (
+            self.state_reports_shed(entity_id, appliance_state)
+            or entity_id not in self._previous_operation_modes
+        ):
+            # Restore the way the appliance was shed. A saved operation mode
+            # means it was turned off through set_operation_mode, typically
+            # because the managed shed service was not registered yet at
+            # startup; releasing it would leave it in "off" for good.
             logger.debug(
                 "Releasing appliance through its managed release service",
                 entity_id=entity_id,
@@ -1081,7 +1095,7 @@ class ApplianceController:
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
-                f"{entity_id}_unavailable",
+                appliance_control_issue_id(entity_id),
                 is_fixable=False,
                 severity=ir.IssueSeverity.ERROR,
                 translation_key=ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
@@ -1212,7 +1226,7 @@ class ApplianceController:
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
-                f"{entity_id}_unavailable",
+                appliance_control_issue_id(entity_id),
                 is_fixable=False,
                 severity=ir.IssueSeverity.ERROR,
                 translation_key=ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
@@ -1260,7 +1274,7 @@ class ApplianceController:
 
     async def turn_on_appliance_service(
         self, entity_id: str, reason: str, context: Context | None = None
-    ) -> None:
+    ) -> bool:
         """
         Handle the turn_on_appliance service call.
 
@@ -1271,6 +1285,10 @@ class ApplianceController:
             entity_id: Entity ID of the appliance to turn on.
             reason: Reason for turning on the appliance.
             context: Optional Home Assistant context.
+
+        Returns:
+            False when nothing could be done to turn it on, so the caller
+            must keep holding it rather than forget it; True otherwise.
 
         """
         logger = ContextLogger(_LOGGER, "service").new_operation(
@@ -1294,7 +1312,7 @@ class ApplianceController:
                     entity_id=entity_id,
                     current_state=appliance_state.state,
                 )
-                return
+                return True
 
             prepared_service_call = self._prepare_turn_on_service_call(
                 entity_id,
@@ -1303,7 +1321,7 @@ class ApplianceController:
                 logger,
             )
             if prepared_service_call is None:
-                return
+                return False
 
             domain, service, service_data = prepared_service_call
 
@@ -1318,6 +1336,8 @@ class ApplianceController:
 
             if self._is_climate_entity(entity_id):
                 self.clear_previous_hvac_mode(entity_id)
+            if self._previous_operation_modes.pop(entity_id, None) is not None:
+                self._schedule_save()
 
             self.hass.bus.async_fire(
                 "logbook_entry",
@@ -1343,6 +1363,8 @@ class ApplianceController:
                     f"Service call: Turned on {entity_id}. Reason: {reason}",
                     category=NOTIFY_RESTORE,
                 )
+
+            return True  # noqa: TRY300
 
         except (EntityNotFoundError, EntityUnavailableError) as exc:
             logger.exception(

@@ -36,6 +36,7 @@ async def async_setup_entry(
 class PowerLoadBalancerEnabledSwitch(SwitchEntity, RestoreEntity):
     """Switch entity to enable/disable Power Load Balancer."""
 
+    _attr_should_poll = False
     _attr_has_entity_name = True
     _attr_translation_key = "enabled"
     _attr_icon = "mdi:power"

@@ -57,12 +57,14 @@ from .const import (
     NON_BINARY_ACTIVE_STATE_DOMAINS,
     NOTIFY_BUDGET,
     NOTIFY_PROBLEM,
+    POWER_TICK_SWEEP_SECONDS,
     SHED_STORE_VERSION,
     SHED_VERIFY_GRACE_SECONDS,
     SUSTAINED_DISARM_GRACE_SECONDS,
     SUSTAINED_ESCALATION_DWELL_SECONDS,
     SUSTAINED_ESCALATION_WINDOW_SECONDS,
     UNAVAILABLE_DEBOUNCE_SECONDS,
+    appliance_control_issue_id,
     shed_store_key,
 )
 from .context_logger import ContextLogger
@@ -186,6 +188,7 @@ class PowerLoadBalancer:
         self._reported_sustained_failure = False
         self._below_arm_since = None
         self._unverified_sheds: set[str] = set()
+        self._last_tick_sweep: float | None = None
         self._pending_sensor: Any = None
         self._event_dispatcher = BalancerEventDispatcher(
             hass,
@@ -494,6 +497,10 @@ class PowerLoadBalancer:
         self, entity_id: str, entity_type: str, state_value: str | None
     ) -> None:
         """Withdraw an unavailability notice once the entity is usable again."""
+        # The appliance controller raises its own notice when a service call
+        # finds the appliance missing, under an id nothing else cleared; a
+        # usable entity withdraws it here too.
+        ir.async_delete_issue(self.hass, DOMAIN, appliance_control_issue_id(entity_id))
         tracked = self._unavailable_entities.pop(entity_id, None)
         if tracked is None:
             return
@@ -870,7 +877,27 @@ class PowerLoadBalancer:
         """
         # Which entity moved does not matter: the sweep re-judges all of them,
         # which is what makes a recovery nobody reported still get noticed.
-        self._evaluate_entity_health()
+        # A meter ticking along between two valid readings changes nothing
+        # the sweep judges, so those ticks run it at most every
+        # POWER_TICK_SWEEP_SECONDS; any reading that is, or was, invalid
+        # runs it at once.
+        old_state = event.data.get("old_state")
+        new_state = event.data.get("new_state")
+        invalid = ("unknown", "unavailable")
+        routine_tick = (
+            old_state is not None
+            and new_state is not None
+            and old_state.state not in invalid
+            and new_state.state not in invalid
+        )
+        now = monotonic()
+        if (
+            not routine_tick
+            or self._last_tick_sweep is None
+            or now - self._last_tick_sweep >= POWER_TICK_SWEEP_SECONDS
+        ):
+            self._last_tick_sweep = now
+            self._evaluate_entity_health()
 
         await self._power_monitor.handle_power_sensor_state_change(
             event, self.async_check_and_balance
@@ -903,20 +930,31 @@ class PowerLoadBalancer:
         was_active = self._state_is_drawing(entity_id, old_state)
 
         if is_now_active and not was_active:
-            await self._handle_appliance_turn_on(entity_id)
+            # An appliance coming back from unavailable, or appearing at
+            # startup, was not switched on by anyone: it was running all along
+            # and its draw is already in the meter total. Vetoing it would
+            # count that draw twice and switch off a running appliance.
+            reappeared = old_state is None or old_state.state in (
+                "unknown",
+                "unavailable",
+            )
+            await self._handle_appliance_turn_on(entity_id, veto=not reappeared)
         elif not is_now_active and was_active:
             self._handle_appliance_turn_off(entity_id)
 
         self.async_check_and_balance()
 
-    async def _handle_appliance_turn_on(self, entity_id: str) -> None:
+    async def _handle_appliance_turn_on(
+        self, entity_id: str, *, veto: bool = True
+    ) -> None:
         """
         Handle an appliance being turned on.
 
         The veto below is for people: it sheds an appliance someone switched
         on into a load it does not fit. The balancer's own restores arrive
         here too, and they were already sized against the headroom when they
-        were chosen, so they skip it.
+        were chosen, so they skip it, as does an appliance that only
+        reappeared after being unavailable.
         """
         own_restore = self._appliance_controller.consume_own_restore(entity_id)
         self._appliance_controller.remove_from_balanced_off(entity_id)
@@ -931,8 +969,10 @@ class PowerLoadBalancer:
                     sensor_config
                 ) or self._appliance_controller.get_nominal_power(entity_id)
 
-                if not own_restore and self._power_monitor.would_exceed_budget(
-                    power_to_add
+                if (
+                    veto
+                    and not own_restore
+                    and self._power_monitor.would_exceed_budget(power_to_add)
                 ):
                     await self._appliance_controller.turn_off_appliance(
                         entity_id,
@@ -1476,12 +1516,19 @@ class PowerLoadBalancer:
         """
         self._appliance_controller.note_own_restore(entity_id)
         try:
-            await self._appliance_controller.turn_on_appliance_service(
+            restored = await self._appliance_controller.turn_on_appliance_service(
                 entity_id, reason
             )
         except BaseException:
             self._appliance_controller.forget_own_restore(entity_id)
             raise
+        if not restored:
+            # Nothing could turn it back on (a climate with no usable HVAC
+            # mode, say). Forgetting it would leave it off for good; keep
+            # holding it and try again after another cooldown.
+            self._appliance_controller.forget_own_restore(entity_id)
+            self._appliance_controller.restart_cooldown(entity_id)
+            return
         self._appliance_controller.remove_from_balanced_off(entity_id)
 
     @callback
