@@ -152,9 +152,16 @@ async def test_what_was_learned_survives_a_reload(hass, world, clock, setup_bala
 
 
 async def _add_sensor_form(hass, entry):
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    return await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "add_sensor"}
+    return await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "appliance"), context={"source": "user"}
+    )
+
+
+def _new_rung(entry) -> dict:
+    return next(
+        dict(sub.data)
+        for sub in entry.subentries.values()
+        if sub.data["appliance"] == NEW_RUNG["appliance"]
     )
 
 
@@ -170,42 +177,29 @@ async def test_a_new_appliance_learns_by_default(hass, world, setup_balancer):
     """Nothing to type: leaving the defaults means learning."""
     entry = await setup_balancer()
     result = await _add_sensor_form(hass, entry)
-    assert result["step_id"] == "add_sensor"
-    result = await hass.config_entries.options.async_configure(
+    assert result["step_id"] == "user"
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], dict(NEW_RUNG)
     )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "finish"}
-    )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    rung = next(
-        r
-        for r in entry.data["power_sensors"]
-        if r["appliance"] == NEW_RUNG["appliance"]
-    )
-    assert rung["power_draw_mode"] == "learn"
+    await hass.async_block_till_done()
+    assert _new_rung(entry)["power_draw_mode"] == "learn"
 
 
 async def test_a_fixed_draw_needs_a_value(hass, world, setup_balancer):
     """Fixed with no watts would silently mean unknown; the form says so."""
     entry = await setup_balancer()
     result = await _add_sensor_form(hass, entry)
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {**NEW_RUNG, "power_draw_mode": "fixed"}
     )
     assert result["errors"] == {"nominal_power_watt": "fixed_power_required"}
 
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {**NEW_RUNG, "power_draw_mode": "fixed", "nominal_power_watt": 1500},
     )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "finish"}
-    )
-    rung = next(
-        r
-        for r in entry.data["power_sensors"]
-        if r["appliance"] == NEW_RUNG["appliance"]
-    )
+    await hass.async_block_till_done()
+    rung = _new_rung(entry)
     assert rung["power_draw_mode"] == "fixed"
     assert rung["nominal_power_watt"] == 1500

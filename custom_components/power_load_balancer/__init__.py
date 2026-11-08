@@ -9,7 +9,7 @@ prioritized by importance and automatically restored when power headroom allows.
 import logging
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
@@ -18,16 +18,22 @@ from homeassistant.helpers.storage import Store
 from .const import (
     ATTR_ENTITY_ID,
     ATTR_REASON,
+    CONF_ALL_APPLIANCES,
+    CONF_APPLIANCE,
+    CONF_BALANCING_ENABLED,
     CONF_NOTIFY_CATEGORIES,
     CONF_NOTIFY_CHANNELS,
     CONF_NOTIFY_PERSISTENT,
     CONF_NOTIFY_SERVICE,
     CONF_NOTIFY_SERVICES,
+    CONF_POWER_SENSORS,
+    CONF_SUBENTRY_ID,
     DOMAIN,
     DRAW_STORE_VERSION,
     SERVICE_TURN_OFF_APPLIANCE,
     SERVICE_TURN_ON_APPLIANCE,
     SHED_STORE_VERSION,
+    SUBENTRY_APPLIANCE,
     draw_store_key,
     shed_store_key,
 )
@@ -38,7 +44,7 @@ from .power_balancer import PowerLoadBalancer
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "switch", "number"]
+PLATFORMS = ["binary_sensor", "sensor", "switch", "number"]
 
 SERVICE_TURN_OFF_APPLIANCE_SCHEMA = vol.Schema(
     {
@@ -83,7 +89,63 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         _LOGGER.info("Migrated Power Load Balancer entry to version 1.2")
 
+    if entry.minor_version < 3:  # noqa: PLR2004
+        _migrate_appliances_to_subentries(hass, entry)
+        _LOGGER.info("Migrated Power Load Balancer entry to version 1.3")
+
     return True
+
+
+def _migrate_appliances_to_subentries(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """
+    1.3: move each appliance from the power_sensors list into a subentry.
+
+    The list could only be edited one appliance at a time behind a dropdown;
+    a subentry is listed on the integration page with its own edit and
+    delete. Every appliance comes across balanced. The appliance entity is the
+    unique id; a second entry for the same appliance, which the old form did
+    not prevent, is kept without one rather than dropped.
+    """
+    data = dict(entry.data)
+    seen: set[str] = set()
+    for appliance in data.pop(CONF_POWER_SENSORS, None) or []:
+        if not isinstance(appliance, dict):
+            continue
+        entity = appliance.get(CONF_APPLIANCE)
+        unique_id = entity if isinstance(entity, str) and entity not in seen else None
+        if unique_id:
+            seen.add(unique_id)
+        title = str(appliance.get("name") or entity or "Appliance")
+        hass.config_entries.async_add_subentry(
+            entry,
+            ConfigSubentry(
+                data={**appliance, CONF_BALANCING_ENABLED: True},
+                subentry_type=SUBENTRY_APPLIANCE,
+                title=title,
+                unique_id=unique_id,
+            ),
+        )
+    hass.config_entries.async_update_entry(
+        entry, data=data, options={}, minor_version=3
+    )
+
+
+def appliance_subentries(entry: ConfigEntry) -> list[ConfigSubentry]:
+    """Return the entry's appliance subentries."""
+    return [
+        subentry
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_APPLIANCE
+    ]
+
+
+def _appliance_configs(entry: ConfigEntry, *, enabled_only: bool) -> list[dict]:
+    """Return each appliance's settings, tagged with its subentry id."""
+    return [
+        {**subentry.data, CONF_SUBENTRY_ID: subentry.subentry_id}
+        for subentry in appliance_subentries(entry)
+        if not enabled_only or subentry.data.get(CONF_BALANCING_ENABLED, True)
+    ]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -105,6 +167,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config_data = {
             **entry.data,
             **entry.options,
+            CONF_POWER_SENSORS: _appliance_configs(entry, enabled_only=True),
+            CONF_ALL_APPLIANCES: _appliance_configs(entry, enabled_only=False),
             "entry_id": entry.entry_id,
             "config_entry": entry,
         }

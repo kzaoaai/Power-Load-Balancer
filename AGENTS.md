@@ -31,14 +31,12 @@ Starts a local Home Assistant instance with the integration loaded in the config
 Runs pytest against a real Home Assistant instance via
 pytest-homeassistant-custom-component. Set up the environment once with:
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
+python3.14 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
 ```
 
-The harness pins its own Home Assistant version, which trails the core this
-integration is deployed against, so the tests cover this integration's logic
-rather than its compatibility with a newer core. The harness also needs an
-older Python than the one the deployed core requires, hence the separate
-virtualenv.
+The harness pins its own Home Assistant version, which may trail the core
+this integration is deployed against by a release or so; see
+`requirements_test.txt`.
 
 Durations (sustained dwell, cooldowns, shed age) are read through
 `clock.monotonic`, so the `clock` fixture can move time without touching the

@@ -1,6 +1,9 @@
 {
   "domain": "power_load_balancer",
   "name": "Power Load Balancer",
+  "after_dependencies": [
+    "recorder"
+  ],
   "codeowners": [
     "@chicco-carone",
     "@kzaoaai"
@@ -10,5 +13,5 @@
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/kzaoaai/Power-Load-Balancer/issues",
-  "version": "1.5.0"
+  "version": "2.0.0"
 }

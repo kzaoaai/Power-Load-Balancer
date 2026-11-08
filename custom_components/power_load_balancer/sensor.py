@@ -5,13 +5,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.const import UnitOfPower
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt
 
-from .const import DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN
+from .appliance_entities import ApplianceEntity, add_appliance_entities
+from .const import DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN, LEARN_MIN_SAMPLES
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -51,6 +53,38 @@ async def async_setup_entry(
             PowerBalancerPendingSensor(power_balancer),
         ]
     )
+    add_appliance_entities(
+        config_entry,
+        async_add_entities,
+        lambda subentry: [ApplianceLearnedDrawSensor(hass, power_balancer, subentry)],
+    )
+
+
+class ApplianceLearnedDrawSensor(ApplianceEntity, SensorEntity):
+    """
+    What the balancer has learned this appliance draws while it runs.
+
+    Unknown until enough readings exist. No state class: it is a slowly
+    moving estimate, not a measurement worth long-term statistics.
+    """
+
+    entity_key = "learned_draw"
+    fallback_label = "learned power draw"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:chart-bell-curve"
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the learned draw, or None while it is still unknown."""
+        watts, _samples = self._balancer.learned_draw(self._appliance)
+        return watts or None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return how many running readings the figure rests on."""
+        _watts, samples = self._balancer.learned_draw(self._appliance)
+        return {"samples": samples, "samples_needed": LEARN_MIN_SAMPLES}
 
 
 class PowerBalancerPendingSensor(SensorEntity):

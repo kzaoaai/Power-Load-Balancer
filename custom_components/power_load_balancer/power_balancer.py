@@ -35,7 +35,9 @@ from .appliance_controller import ApplianceController
 from .balancing_engine import BalancingCallbacks, BalancingEngine
 from .clock import monotonic, wall_time
 from .const import (
+    CONF_ALL_APPLIANCES,
     CONF_APPLIANCE,
+    CONF_BALANCING_ENABLED,
     CONF_BUDGET_RAISE_DELAY_SECONDS,
     CONF_BUDGET_SOURCE_ENTITY,
     CONF_BUDGET_SOURCE_MAP,
@@ -174,6 +176,10 @@ class PowerLoadBalancer:
 
         self._main_power_sensor_entity_id = config_data[CONF_MAIN_POWER_SENSOR]
         self._monitored_sensors = config_data.get(CONF_POWER_SENSORS, [])
+        self._all_appliances: list[dict[str, Any]] = config_data.get(
+            CONF_ALL_APPLIANCES, self._monitored_sensors
+        )
+        self._appliance_listeners: list[Callable[[], None]] = []
         self._power_budget = config_data[CONF_POWER_BUDGET_WATT]
         self._global_cooldown_seconds = config_data.get(
             CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS
@@ -304,10 +310,11 @@ class PowerLoadBalancer:
         self._appliance_controller.learner.forget_except(
             {
                 str(sensor[CONF_APPLIANCE])
-                for sensor in self._monitored_sensors
+                for sensor in self._all_appliances
                 if sensor.get(CONF_APPLIANCE)
             }
         )
+        self._clear_issues_of_unbalanced_appliances()
         self._adopt_appliances_already_shed()
         appliances = saved.get("appliances") if isinstance(saved, dict) else None
         self._adopt_saved_sheds(appliances if isinstance(appliances, dict) else {})
@@ -1328,9 +1335,112 @@ class PowerLoadBalancer:
             self._schedule_sustained_check(remaining)
 
     def _refresh_pending_sensor(self) -> None:
-        """Let the pending-actions sensor recompute, if it exists yet."""
+        """Let the pending-actions sensor and per-appliance entities recompute."""
         if self._pending_sensor is not None:
             self._pending_sensor.refresh()
+        for listener in list(self._appliance_listeners):
+            listener()
+
+    @callback
+    def add_appliance_listener(
+        self, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Call listener whenever what is shed or learned may have changed."""
+        self._appliance_listeners.append(listener)
+
+        @callback
+        def _remove() -> None:
+            if listener in self._appliance_listeners:
+                self._appliance_listeners.remove(listener)
+
+        return _remove
+
+    def is_balanced(self, appliance: str) -> bool:
+        """Return True if the appliance is configured and its balancing is on."""
+        return any(
+            sensor.get(CONF_APPLIANCE) == appliance
+            for sensor in self._monitored_sensors
+        )
+
+    def shed_info(self, appliance: str) -> dict[str, Any] | None:
+        """Return why and since when the balancer holds an appliance off."""
+        return self._appliance_controller.get_shed_info(appliance)
+
+    def learned_draw(self, appliance: str) -> tuple[int, int]:
+        """Return the learned draw in watts (0 if unknown) and the sample count."""
+        learner = self._appliance_controller.learner
+        return round(learner.learned(appliance)), learner.sample_count(appliance)
+
+    def _clear_issues_of_unbalanced_appliances(self) -> None:
+        """
+        Delete repairs left for appliances whose balancing is switched off.
+
+        An appliance put away for the season is not watched at all, so
+        nothing would ever clear a repair raised while it was still balanced.
+        """
+        balanced = {
+            entity
+            for sensor in self._monitored_sensors
+            for entity in (sensor.get(CONF_APPLIANCE), sensor.get(CONF_ENTITY_ID))
+        }
+        for sensor in self._all_appliances:
+            for entity in (sensor.get(CONF_APPLIANCE), sensor.get(CONF_ENTITY_ID)):
+                if not isinstance(entity, str) or entity in balanced:
+                    continue
+                for issue_id in (
+                    self._get_unavailable_issue_id(entity),
+                    self._get_not_registered_issue_id(entity),
+                    self._get_non_controllable_issue_id(entity),
+                    appliance_control_issue_id(entity),
+                ):
+                    ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+    async def async_set_appliance_balancing(
+        self, subentry_id: str, *, enabled: bool
+    ) -> None:
+        """
+        Switch balancing of one appliance on or off.
+
+        Stored in its subentry, which reloads the balancer with the appliance
+        included or left out. One the balancer is holding off is given back
+        first: once left out, nothing would ever restore it.
+        """
+        entry = self.entry
+        subentry = entry.subentries.get(subentry_id)
+        if subentry is None:
+            return
+        appliance = subentry.data.get(CONF_APPLIANCE)
+        if not enabled:
+            # Leave it out of this instance at once, as the reload will: the
+            # restore below otherwise lands in a house still over budget and
+            # the balancer sheds it again before the reload takes it away.
+            # Every part of the balancer shares this list.
+            self._monitored_sensors[:] = [
+                sensor
+                for sensor in self._monitored_sensors
+                if sensor.get(CONF_APPLIANCE) != appliance
+            ]
+        if (
+            not enabled
+            and isinstance(appliance, str)
+            and self._appliance_controller.is_appliance_balanced_off(appliance)
+        ):
+            self._appliance_controller.cancel_scheduled_turn_on(appliance)
+            try:
+                await self._restore_appliance(
+                    appliance, "Balancing switched off for this appliance"
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Could not give %s back before switching its balancing off",
+                    appliance,
+                )
+            self._appliance_controller.remove_from_balanced_off(appliance)
+        self.hass.config_entries.async_update_subentry(
+            entry,
+            subentry,
+            data={**subentry.data, CONF_BALANCING_ENABLED: enabled},
+        )
 
     def _verify_sheds_took_effect(self) -> None:
         """
@@ -1883,8 +1993,13 @@ class PowerLoadBalancer:
         if appliance is None:
             return
         watts = self._power_monitor.get_sensor_power(sensor_id)
-        if self._appliance_controller.learner.add(appliance, watts):
+        learner = self._appliance_controller.learner
+        before = learner.learned(appliance)
+        if learner.add(appliance, watts):
             self._schedule_draw_save()
+            if learner.learned(appliance) != before:
+                for listener in list(self._appliance_listeners):
+                    listener()
 
     def _schedule_draw_save(self) -> None:
         """

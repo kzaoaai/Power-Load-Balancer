@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
+from datetime import timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -16,9 +18,17 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
+    ConfigSubentryFlow,
     OptionsFlow,
+    SubentryFlowResult,
 )
-from homeassistant.const import CONF_ENTITY_ID, CONF_NAME
+from homeassistant.const import (
+    CONF_ENTITY_ID,
+    CONF_NAME,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
+from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
@@ -32,12 +42,20 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
 )
+from homeassistant.util import dt as dt_util
 
 from .const import (
+    BUDGET_MODE_FIXED,
+    BUDGET_MODE_SOURCE,
+    BUDGET_MODES,
+    BUDGET_SOURCE_HISTORY_DAYS,
+    BUDGET_SOURCE_MAX_STATES,
     CHANNEL_BOTH,
     CHANNEL_NONE,
     CHANNEL_SERVICE,
     CONF_APPLIANCE,
+    CONF_BALANCING_ENABLED,
+    CONF_BUDGET_MODE,
     CONF_BUDGET_RAISE_DELAY_SECONDS,
     CONF_BUDGET_SOURCE_ENTITY,
     CONF_BUDGET_SOURCE_MAP,
@@ -51,7 +69,6 @@ from .const import (
     CONF_NOTIFY_SERVICES,
     CONF_POWER_BUDGET_WATT,
     CONF_POWER_DRAW_MODE,
-    CONF_POWER_SENSORS,
     CONF_SUSTAINED_DURATION_SECONDS,
     CONF_SUSTAINED_ENABLED,
     CONF_SUSTAINED_THRESHOLD_PERCENT,
@@ -67,6 +84,7 @@ from .const import (
     NOTIFY_CHANNELS,
     POWER_DRAW_FIXED,
     POWER_DRAW_MODES,
+    SUBENTRY_APPLIANCE,
     SUPPORTED_APPLIANCE_DOMAINS,
 )
 from .draw_learning import resolve_power_draw_mode
@@ -375,8 +393,6 @@ def _build_sensor_edit_schema(initial_data: dict[str, Any]) -> vol.Schema:
         _nominal_power_selector()
     )
 
-    schema_dict[vol.Optional("remove_sensor")] = bool
-
     return vol.Schema(schema_dict)
 
 
@@ -424,53 +440,63 @@ def _get_friendly_name_for_entity(hass: HomeAssistant, entity_id: str) -> str | 
     return result
 
 
-def _format_budget_map(source_map: Any) -> str:
-    """Render a stored {state: watts} map as one "state = watts" per line."""
-    if not isinstance(source_map, dict):
-        return ""
-    return "\n".join(f"{state} = {watts}" for state, watts in source_map.items())
+ADD_STATES_FIELD = "add_states"
+_UNUSABLE_SOURCE_STATES = {STATE_UNKNOWN, STATE_UNAVAILABLE, ""}
 
 
-def _parse_budget_map(text: str) -> dict[str, int] | None:
+def _cooldown_selector() -> NumberSelector:
+    """Return the selector for the default cooldown."""
+    return NumberSelector(
+        NumberSelectorConfig(
+            min=1,
+            max=3600,
+            step=1,
+            mode=NumberSelectorMode.BOX,
+            unit_of_measurement="s",
+        )
+    )
+
+
+def _main_sensor_schema(config_data: dict[str, Any]) -> vol.Schema:
     """
-    Parse "state = watts" lines into a map; None if any line is invalid.
+    Return the main settings form: meter, budget, cooldown, sustained load.
 
-    Blank lines are skipped. States are taken verbatim, so they must match
-    what the source entity reports, capitals included.
+    The budget is either one figure or follows a source entity, one budget
+    per state of it. The figure stays required in both modes: it is what the
+    balancer starts on and keeps while the source reports a state with no
+    budget of its own.
     """
-    parsed: dict[str, int] = {}
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        state, sep, watts = line.rpartition("=")
-        state = state.strip()
-        if not sep or not state:
-            return None
-        try:
-            value = int(watts.strip())
-        except ValueError:
-            return None
-        if value <= 0:
-            return None
-        parsed[state] = value
-    return parsed
-
-
-def _budget_source_schema_fields(prefill: dict[str, Any]) -> dict[Any, Any]:
-    """Return the fields of the budget-by-source form."""
-    return {
+    sensor = config_data.get(CONF_MAIN_POWER_SENSOR)
+    budget = config_data.get(CONF_POWER_BUDGET_WATT)
+    source = config_data.get(CONF_BUDGET_SOURCE_ENTITY)
+    fields: dict[Any, Any] = {
+        vol.Required(
+            CONF_MAIN_POWER_SENSOR,
+            **({"default": sensor} if sensor is not None else {}),
+        ): _get_power_sensor_selector(),
+        vol.Required(
+            CONF_BUDGET_MODE,
+            default=BUDGET_MODE_SOURCE if source else BUDGET_MODE_FIXED,
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=list(BUDGET_MODES),
+                mode=SelectSelectorMode.LIST,
+                translation_key="budget_mode",
+            )
+        ),
+        vol.Required(
+            CONF_POWER_BUDGET_WATT,
+            **({"default": budget} if budget is not None else {}),
+        ): int,
         vol.Optional(
             CONF_BUDGET_SOURCE_ENTITY,
-            description={"suggested_value": prefill.get(CONF_BUDGET_SOURCE_ENTITY)},
-        ): EntitySelector(EntitySelectorConfig(domain="sensor")),
-        vol.Optional(
-            CONF_BUDGET_SOURCE_MAP,
-            default=_format_budget_map(prefill.get(CONF_BUDGET_SOURCE_MAP)),
-        ): TextSelector(TextSelectorConfig(multiline=True)),
+            description={"suggested_value": source},
+        ): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "select", "input_select"])
+        ),
         vol.Optional(
             CONF_BUDGET_RAISE_DELAY_SECONDS,
-            default=prefill.get(
+            default=config_data.get(
                 CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
             ),
         ): NumberSelector(
@@ -482,76 +508,216 @@ def _budget_source_schema_fields(prefill: dict[str, Any]) -> dict[Any, Any]:
                 unit_of_measurement="s",
             )
         ),
+        vol.Required(
+            CONF_COOLDOWN_SECONDS,
+            default=config_data.get(CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS),
+        ): _cooldown_selector(),
     }
+    fields.update(_sustained_schema_fields(config_data))
+    return vol.Schema(fields)
 
 
-def _store_budget_source(
+def _store_main_sensor_input(
     config_data: dict[str, Any], user_input: dict[str, Any]
 ) -> dict[str, str]:
     """
-    Validate the budget-by-source form and store it; return any errors.
+    Validate the main settings form and store it; return any errors.
 
-    Clearing the entity turns the feature off; the map is kept for next time.
+    Choosing a fixed budget forgets the source entity but keeps its per-state
+    budgets, so switching back offers them again. Choosing a different source
+    entity starts its budgets afresh: the old states mean nothing to it.
     """
-    source_map = _parse_budget_map(str(user_input.get(CONF_BUDGET_SOURCE_MAP, "")))
-    if source_map is None:
-        return {CONF_BUDGET_SOURCE_MAP: "invalid_budget_map"}
-    entity = user_input.get(CONF_BUDGET_SOURCE_ENTITY)
-    if entity and not source_map:
-        return {CONF_BUDGET_SOURCE_MAP: "budget_map_required"}
+    errors: dict[str, str] = {}
+    power_budget = user_input.get(CONF_POWER_BUDGET_WATT)
+    if not isinstance(power_budget, int) or power_budget <= 0:
+        errors[CONF_POWER_BUDGET_WATT] = "valid_budget_required"
+    mode = user_input.get(CONF_BUDGET_MODE, BUDGET_MODE_FIXED)
+    source = user_input.get(CONF_BUDGET_SOURCE_ENTITY)
+    if mode == BUDGET_MODE_SOURCE and not source:
+        errors[CONF_BUDGET_SOURCE_ENTITY] = "source_entity_required"
+    if errors:
+        return errors
 
-    if entity:
-        config_data[CONF_BUDGET_SOURCE_ENTITY] = entity
+    config_data[CONF_MAIN_POWER_SENSOR] = user_input[CONF_MAIN_POWER_SENSOR]
+    config_data[CONF_POWER_BUDGET_WATT] = power_budget
+    cooldown = user_input.get(CONF_COOLDOWN_SECONDS)
+    config_data[CONF_COOLDOWN_SECONDS] = (
+        int(cooldown)
+        if isinstance(cooldown, (int, float))
+        else DEFAULT_COOLDOWN_SECONDS
+    )
+    _store_sustained_options(config_data, user_input)
+
+    if mode == BUDGET_MODE_SOURCE:
+        previous = config_data.get(CONF_BUDGET_SOURCE_ENTITY)
+        if previous and previous != source:
+            config_data[CONF_BUDGET_SOURCE_MAP] = {}
+        config_data[CONF_BUDGET_SOURCE_ENTITY] = source
+        config_data[CONF_BUDGET_RAISE_DELAY_SECONDS] = int(
+            user_input.get(
+                CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
+            )
+        )
     else:
         config_data.pop(CONF_BUDGET_SOURCE_ENTITY, None)
-    config_data[CONF_BUDGET_SOURCE_MAP] = source_map
-    config_data[CONF_BUDGET_RAISE_DELAY_SECONDS] = int(
-        user_input.get(
-            CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
-        )
-    )
     return {}
 
 
-def _build_menu_options(
-    config_data: dict[str, Any],
-    *,
-    include_finish: bool = True,
-) -> dict[str, str]:
+async def _recorded_states(hass: HomeAssistant, entity_id: str) -> list[str]:
     """
-    Build the menu options for the config flow.
+    Return the states the recorder saw an entity report lately, newest first.
 
-    Args:
-        config_data: Current configuration data.
-        include_finish: Whether to include the finish option.
-
-    Returns:
-        Dictionary mapping action keys to display labels.
-
+    Best effort: without the recorder, or if the query fails, the form still
+    offers the declared and current states and lets the user add others.
     """
-    options: dict[str, str] = {}
-
-    main_sensor_text = (
-        "Edit Main Sensor Settings"
-        if config_data.get(CONF_MAIN_POWER_SENSOR)
-        else "Configure Main Sensor"
-    )
-    options["edit_main_sensor"] = main_sensor_text
-    options["edit_notifications"] = "Notification Settings"
-    options["edit_budget_source"] = "Budget by Power Source"
-    options["add_sensor"] = "Add New Monitored Sensor"
-
-    configured_sensors: list[dict[str, Any]] = config_data.get(CONF_POWER_SENSORS, [])
-    for i, sensor_config in enumerate(configured_sensors):
-        sensor_name = sensor_config.get(CONF_NAME) or sensor_config.get(
-            CONF_ENTITY_ID, f"Sensor {i + 1}"
+    if "recorder" not in hass.config.components:
+        return []
+    try:
+        from homeassistant.components.recorder import (  # noqa: PLC0415
+            get_instance,
+            history,
         )
-        options[f"edit_sensor_{i}"] = f"Edit: {sensor_name}"
 
-    if include_finish:
-        options["finish"] = "Save Configuration"
+        start = dt_util.utcnow() - timedelta(days=BUDGET_SOURCE_HISTORY_DAYS)
+        changes = await get_instance(hass).async_add_executor_job(
+            partial(
+                history.state_changes_during_period,
+                hass,
+                start,
+                entity_id=entity_id,
+                no_attributes=True,
+                descending=True,
+                limit=5000,
+            )
+        )
+    except Exception:
+        _LOGGER.debug("Could not read the history of %s", entity_id, exc_info=True)
+        return []
+    return [state.state for state in changes.get(entity_id.lower(), [])]
 
-    return options
+
+async def _known_source_states(
+    hass: HomeAssistant, entity_id: str, also: list[str]
+) -> list[str]:
+    """
+    Return the states to offer a budget for, in a stable, useful order.
+
+    Declared options first (an enum sensor or a select lists every state it
+    can take), then what the recorder saw, then the current state, then any
+    already configured or added by hand.
+    """
+    states: list[str] = []
+
+    def _add(value: object) -> None:
+        if (
+            isinstance(value, str)
+            and value not in _UNUSABLE_SOURCE_STATES
+            and value not in states
+        ):
+            states.append(value)
+
+    current = hass.states.get(entity_id)
+    if current is not None:
+        for option in current.attributes.get("options") or []:
+            _add(option)
+    for value in await _recorded_states(hass, entity_id):
+        _add(value)
+    if current is not None:
+        _add(current.state)
+    configured = [value for value in also if value not in states]
+    room = max(BUDGET_SOURCE_MAX_STATES - len(configured), 0)
+    return [*states[:room], *configured]
+
+
+def _budget_states_schema(states: list[str], prefill: dict[str, Any]) -> vol.Schema:
+    """Return one budget field per source state, plus a field to add states."""
+    fields: dict[Any, Any] = {
+        vol.Optional(
+            state, description={"suggested_value": prefill.get(state)}
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=1,
+                max=1_000_000,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+            )
+        )
+        for state in states
+    }
+    fields[vol.Optional(ADD_STATES_FIELD, default=[])] = SelectSelector(
+        SelectSelectorConfig(options=[], multiple=True, custom_value=True)
+    )
+    return vol.Schema(fields)
+
+
+class _BudgetStatesStep:
+    """
+    The per-state budget form, shared by the config and options flows.
+
+    Shown after the main settings when the budget follows a source entity.
+    A state left blank has no budget of its own: while the source reports
+    it, the budget stays where it was.
+    """
+
+    hass: HomeAssistant
+    _config_data: dict[str, Any]
+    _added_source_states: list[str]
+
+    async def _async_return_to_menu(self) -> ConfigFlowResult:
+        """Return to the flow's menu once the form is done."""
+        raise NotImplementedError
+
+    async def async_step_budget_states(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for the budget that goes with each state of the source."""
+        entity_id: str = self._config_data[CONF_BUDGET_SOURCE_ENTITY]
+        saved: dict[str, int] = dict(
+            self._config_data.get(CONF_BUDGET_SOURCE_MAP) or {}
+        )
+        added = getattr(self, "_added_source_states", [])
+        errors: dict[str, str] = {}
+        prefill: dict[str, Any] = saved
+
+        if user_input is not None:
+            entered = {
+                state: int(value)
+                for state, value in user_input.items()
+                if state != ADD_STATES_FIELD and value not in (None, "")
+            }
+            new_states = [
+                str(value).strip()
+                for value in user_input.get(ADD_STATES_FIELD) or []
+                if str(value).strip()
+            ]
+            prefill = entered
+            if new_states:
+                self._added_source_states = [
+                    *added,
+                    *(value for value in new_states if value not in added),
+                ]
+                added = self._added_source_states
+            elif not entered:
+                errors["base"] = "budget_map_required"
+            else:
+                self._config_data[CONF_BUDGET_SOURCE_MAP] = entered
+                self._added_source_states = []
+                return await self._async_return_to_menu()
+
+        states = await _known_source_states(self.hass, entity_id, [*saved, *added])
+        source = self.hass.states.get(entity_id)
+        name = (
+            source.attributes.get("friendly_name", entity_id) if source else entity_id
+        )
+        return self.async_show_form(  # type: ignore[attr-defined]
+            step_id="budget_states",
+            data_schema=_budget_states_schema(states, prefill),
+            errors=errors,
+            description_placeholders={
+                "source": str(name),
+                "budget": str(self._config_data.get(CONF_POWER_BUDGET_WATT)),
+            },
+        )
 
 
 def _process_sensor_input(
@@ -586,7 +752,9 @@ def _process_sensor_input(
     sensor_entity_id_str = str(sensor_entity_id)
     appliance_entity_id_str = str(appliance_entity_id)
 
-    friendly_name = _get_friendly_name_for_entity(hass, sensor_entity_id_str)
+    friendly_name = _get_friendly_name_for_entity(
+        hass, appliance_entity_id_str
+    ) or _get_friendly_name_for_entity(hass, sensor_entity_id_str)
     if custom_name:
         name_to_use = str(custom_name)
     elif friendly_name:
@@ -658,7 +826,7 @@ STEP_ADD_SENSOR_SCHEMA: vol.Schema = vol.Schema(
 )
 
 
-class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
+class PowerLoadBalancerConfigFlow(_BudgetStatesStep, ConfigFlow, domain=DOMAIN):
     """
     Handle a config flow for Power Load Balancer.
 
@@ -667,63 +835,37 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
     """
 
     VERSION: int = 1
-    MINOR_VERSION: int = 2
+    MINOR_VERSION: int = 3
     _config_data: dict[str, Any]
 
-    async def async_step_user(  # noqa: PLR0911
+    async def async_step_user(
         self,
-        user_input: dict[str, object] | None = None,
+        user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """
-        Handle the initial configuration step and show the main menu.
+        Start with the main settings; appliances are added afterwards.
 
-        Args:
-            user_input: User input from the form, or None on first display.
-
-        Returns:
-            ConfigFlowResult directing to the next step or completing setup.
-
+        Each appliance is its own subentry, added from the integration page
+        once the balancer exists, and notifications are set in its options.
         """
-        _LOGGER.debug(
-            "Opening config flow step: async_step_user, user_input=%s", user_input
-        )
         if not hasattr(self, "_config_data"):
-            self._config_data = {CONF_POWER_SENSORS: []}
+            self._config_data = {}
+        return await self.async_step_edit_main_sensor(user_input)
 
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            action = user_input.get("action")
-            if action == "edit_main_sensor":
-                return await self.async_step_edit_main_sensor()
-            if action == "edit_notifications":
-                return await self.async_step_edit_notifications()
-            if action == "edit_budget_source":
-                return await self.async_step_edit_budget_source()
-            if action == "add_sensor":
-                return await self.async_step_add_sensor()
-            if action and str(action).startswith("edit_sensor_"):
-                try:
-                    sensor_index = int(str(action).replace("edit_sensor_", ""))
-                    return await self.async_step_edit_sensor(sensor_index=sensor_index)
-                except ValueError:
-                    errors["base"] = "invalid_edit_action"
-            if action == "finish":
-                if not self._config_data.get(CONF_MAIN_POWER_SENSOR):
-                    errors["base"] = "main_sensor_required"
-                else:
-                    return self.async_create_entry(
-                        title="Power Load Balancer", data=self._config_data
-                    )
-
-        options = _build_menu_options(self._config_data)
-        options["finish"] = "Finish Configuration"
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({vol.Required("action"): vol.In(options)}),
-            errors=errors,
+    async def _async_create(self) -> ConfigFlowResult:
+        """Create the entry from the collected settings."""
+        return self.async_create_entry(
+            title="Power Load Balancer", data=self._config_data
         )
+
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls,
+        config_entry: ConfigEntry,  # noqa: ARG003
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """Each appliance the balancer may switch is a subentry of its entry."""
+        return {SUBENTRY_APPLIANCE: ApplianceSubentryFlow}
 
     @staticmethod
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
@@ -748,235 +890,30 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
             user_input,
         )
         errors: dict[str, str] = {}
-
         if user_input is not None:
-            power_budget = user_input.get(CONF_POWER_BUDGET_WATT)
-            if (
-                power_budget is None
-                or not isinstance(power_budget, int)
-                or power_budget <= 0
-            ):
-                errors[CONF_POWER_BUDGET_WATT] = "valid_budget_required"
+            errors = _store_main_sensor_input(self._config_data, dict(user_input))
             if not errors:
-                self._config_data[CONF_MAIN_POWER_SENSOR] = user_input[
-                    CONF_MAIN_POWER_SENSOR
-                ]
-                self._config_data[CONF_POWER_BUDGET_WATT] = power_budget
-                cooldown = user_input.get(CONF_COOLDOWN_SECONDS)
-                if isinstance(cooldown, (int, float)):
-                    self._config_data[CONF_COOLDOWN_SECONDS] = int(cooldown)
-                else:
-                    self._config_data[CONF_COOLDOWN_SECONDS] = DEFAULT_COOLDOWN_SECONDS
-                _store_sustained_options(self._config_data, user_input)
-                return await self.async_step_user()
-
-        schema_dict: dict[Any, Any] = {}
-        current_sensor = self._config_data.get(CONF_MAIN_POWER_SENSOR)
-        current_budget = self._config_data.get(CONF_POWER_BUDGET_WATT)
-        current_cooldown = self._config_data.get(
-            CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS
-        )
-
-        if current_sensor is not None:
-            schema_dict[
-                vol.Required(CONF_MAIN_POWER_SENSOR, default=current_sensor)
-            ] = _get_power_sensor_selector()
-        else:
-            schema_dict[vol.Required(CONF_MAIN_POWER_SENSOR)] = (
-                _get_power_sensor_selector()
-            )
-
-        if current_budget is not None:
-            schema_dict[
-                vol.Required(CONF_POWER_BUDGET_WATT, default=current_budget)
-            ] = int
-        else:
-            schema_dict[vol.Required(CONF_POWER_BUDGET_WATT)] = int
-
-        schema_dict[vol.Required(CONF_COOLDOWN_SECONDS, default=current_cooldown)] = (
-            NumberSelector(
-                NumberSelectorConfig(
-                    min=1,
-                    max=3600,
-                    step=1,
-                    mode=NumberSelectorMode.BOX,
-                    unit_of_measurement="s",
-                )
-            )
-        )
-        schema_dict.update(_sustained_schema_fields(self._config_data))
+                if self._config_data.get(CONF_BUDGET_SOURCE_ENTITY):
+                    return await self.async_step_budget_states()
+                return await self._async_create()
 
         return self.async_show_form(
             step_id="edit_main_sensor",
-            data_schema=vol.Schema(schema_dict),
+            data_schema=_main_sensor_schema(self._config_data),
             errors=errors,
         )
 
-    async def async_step_edit_budget_source(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """
-        Let the budget follow the supply that is carrying the house.
-
-        One "state = watts" per line, matched against what the chosen sensor
-        reports. Leave the sensor empty to set the budget by hand or by an
-        automation instead.
-        """
-        errors: dict[str, str] = {}
-        prefill: dict[str, Any] = self._config_data
-        if user_input is not None:
-            errors = _store_budget_source(self._config_data, user_input)
-            if not errors:
-                return await self.async_step_user()
-            prefill = {
-                **self._config_data,
-                CONF_BUDGET_SOURCE_ENTITY: user_input.get(CONF_BUDGET_SOURCE_ENTITY),
-            }
-
-        return self.async_show_form(
-            step_id="edit_budget_source",
-            data_schema=vol.Schema(_budget_source_schema_fields(prefill)),
-            errors=errors,
-        )
-
-    async def async_step_edit_notifications(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """
-        Show the notification settings.
-
-        These belong beside the balancer's own settings rather than inside the
-        main sensor form: they say nothing about which meter is read or what
-        the ceiling is, and burying them under an unrelated heading is why
-        they were hard to find.
-        """
-        errors: dict[str, str] = {}
-        prefill = self._config_data
-        if user_input is not None:
-            errors = _validate_notify_options(user_input)
-            if not errors:
-                _store_notify_options(self._config_data, user_input)
-                return await self.async_step_user()
-            # Re-show what was just submitted rather than what was saved, so a
-            # rejected form does not throw the choices away.
-            prefill = dict(self._config_data)
-            _store_notify_options(prefill, user_input)
-
-        return self.async_show_form(
-            step_id="edit_notifications",
-            data_schema=vol.Schema(_notify_schema_fields(self.hass, prefill)),
-            errors=errors,
-        )
-
-    async def async_step_add_sensor(
-        self, user_input: dict[str, object] | None = None
-    ) -> ConfigFlowResult:
-        """
-        Show form to add a new monitored power sensor.
-
-        Args:
-            user_input: User input from the form, or None on first display.
-
-        Returns:
-            ConfigFlowResult with form or directing to next step.
-
-        """
-        _LOGGER.debug(
-            "Opening config flow step: async_step_add_sensor, user_input=%s",
-            user_input,
-        )
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            errors, sensor_config = _process_sensor_input(self.hass, dict(user_input))
-            if not errors and sensor_config:
-                if CONF_POWER_SENSORS not in self._config_data or not isinstance(
-                    self._config_data[CONF_POWER_SENSORS], list
-                ):
-                    self._config_data[CONF_POWER_SENSORS] = []
-                self._config_data[CONF_POWER_SENSORS].append(sensor_config)
-                return await self.async_step_user()
-
-        return self.async_show_form(
-            step_id="add_sensor",
-            data_schema=STEP_ADD_SENSOR_SCHEMA,
-            errors=errors,
-        )
-
-    async def async_step_edit_sensor(
-        self,
-        user_input: dict[str, object] | None = None,
-        sensor_index: int | None = None,
-    ) -> ConfigFlowResult:
-        """
-        Show form to edit an existing monitored power sensor.
-
-        Args:
-            user_input: User input from the form, or None on first display.
-            sensor_index: Index of the sensor to edit in the sensors list.
-
-        Returns:
-            ConfigFlowResult with form or directing to next step.
-
-        """
-        _LOGGER.debug(
-            "Opening config flow step: async_step_edit_sensor, "
-            "user_input=%s, sensor_index=%s",
-            user_input,
-            sensor_index,
-        )
-        errors: dict[str, str] = {}
-        sensors: list[dict[str, Any]] = self._config_data.get(CONF_POWER_SENSORS, [])
-
-        if sensor_index is not None:
-            self._editing_sensor_index = sensor_index
-        elif hasattr(self, "_editing_sensor_index"):
-            sensor_index = self._editing_sensor_index
-
-        if sensor_index is None or sensor_index < 0 or sensor_index >= len(sensors):
-            return self.async_abort(reason="invalid_sensor_index")
-
-        current_sensor_config = sensors[sensor_index]
-
-        if user_input is not None:
-            if user_input.get("remove_sensor"):
-                del self._config_data[CONF_POWER_SENSORS][sensor_index]
-                return await self.async_step_user()
-
-            errors, sensor_config = _process_sensor_input(self.hass, dict(user_input))
-            if not errors and sensor_config:
-                self._config_data[CONF_POWER_SENSORS][sensor_index] = sensor_config
-                return await self.async_step_user()
-
-        initial_data = {
-            CONF_ENTITY_ID: current_sensor_config.get(CONF_ENTITY_ID),
-            CONF_NAME: current_sensor_config.get(CONF_NAME),
-            CONF_IMPORTANCE: current_sensor_config.get(
-                CONF_IMPORTANCE, DEFAULT_IMPORTANCE
-            ),
-            CONF_LAST_RESORT: current_sensor_config.get(CONF_LAST_RESORT, False),
-            CONF_APPLIANCE: current_sensor_config.get(CONF_APPLIANCE),
-            CONF_DEVICE_COOLDOWN: current_sensor_config.get(CONF_DEVICE_COOLDOWN),
-            CONF_NOMINAL_POWER_WATT: current_sensor_config.get(
-                CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
-            ),
-            CONF_POWER_DRAW_MODE: resolve_power_draw_mode(current_sensor_config),
-        }
-
-        return self.async_show_form(
-            step_id="edit_sensor",
-            data_schema=_build_sensor_edit_schema(initial_data),
-            errors=errors,
-            last_step=False,
-        )
+    async def _async_return_to_menu(self) -> ConfigFlowResult:
+        """Return to the menu after the per-state budget form."""
+        return await self._async_create()
 
 
-class PowerLoadBalancerOptionsFlow(OptionsFlow):
+class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
     """
     Options flow to reconfigure Power Load Balancer after initial setup.
 
-    This class handles reconfiguration of an existing integration instance,
-    allowing users to modify sensors, power budgets, and monitored appliances.
+    It covers the balancer's own settings. Appliances are subentries, edited
+    from the integration page.
     """
 
     def __init__(self, config_entry: ConfigEntry) -> None:
@@ -995,152 +932,34 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
         self._config_data: dict[str, Any] = deepcopy(dict(data_source))
 
     async def async_step_init(
-        self,
-        user_input: dict[str, object] | None = None,
-        *,
-        force_show_form: bool = False,
+        self, _user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """
-        First step in options flow.
+        Show the settings menu.
 
-        Args:
-            user_input: User input from the form, or None on first display.
-            force_show_form: Force showing the form even if already configured.
-
-        Returns:
-            ConfigFlowResult directing to the next step.
-
+        Appliances are not here: each is a subentry with its own edit and
+        delete on the integration page, and its own balancing switch.
         """
-        _LOGGER.debug(
-            "Opening options flow step: async_step_init, "
-            "user_input=%s, force_show_form=%s",
-            user_input,
-            force_show_form,
-        )
-        main_sensor = self._config_data.get(CONF_MAIN_POWER_SENSOR)
-        power_budget = self._config_data.get(CONF_POWER_BUDGET_WATT)
-
-        if (
-            not force_show_form
-            and main_sensor is not None
-            and power_budget is not None
-            and user_input is None
-        ):
-            return await self.async_step_sensor_menu()
-
-        if user_input is not None:
-            self._config_data[CONF_MAIN_POWER_SENSOR] = user_input[
-                CONF_MAIN_POWER_SENSOR
-            ]
-            self._config_data[CONF_POWER_BUDGET_WATT] = user_input[
-                CONF_POWER_BUDGET_WATT
-            ]
-            return await self.async_step_sensor_menu()
-
-        return self.async_show_form(
+        return self.async_show_menu(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_MAIN_POWER_SENSOR,
-                        default=self._config_data.get(CONF_MAIN_POWER_SENSOR),
-                    ): _get_power_sensor_selector(),
-                    vol.Required(
-                        CONF_POWER_BUDGET_WATT,
-                        default=self._config_data.get(CONF_POWER_BUDGET_WATT),
-                    ): int,
-                }
-            ),
+            menu_options=["edit_main_sensor", "edit_notifications", "finish"],
         )
 
-    async def async_step_sensor_menu(  # noqa: PLR0911
-        self, user_input: dict[str, Any] | None = None
+    async def async_step_finish(
+        self, _user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """
-        Menu for managing monitored sensors.
+        Save the settings.
 
-        Args:
-            user_input: User input from the form, or None on first display.
-
-        Returns:
-            ConfigFlowResult directing to the selected action.
-
+        The configuration lives in data alone (see async_migrate_entry);
+        options stay empty. One update, one reload.
         """
-        _LOGGER.debug(
-            "Opening options flow step: async_step_sensor_menu, user_input=%s",
-            user_input,
+        self.hass.config_entries.async_update_entry(
+            self._config_entry,
+            data=deepcopy(self._config_data),
+            options={},
         )
-        if user_input is not None:
-            action = user_input.get("action", "")
-            if action == "edit_main_sensor":
-                return await self.async_step_edit_main_sensor()
-            if action == "edit_notifications":
-                return await self.async_step_edit_notifications()
-            if action == "edit_budget_source":
-                return await self.async_step_edit_budget_source()
-            if action == "add_sensor":
-                return await self.async_step_add_sensor()
-            if action == "finish":
-                _LOGGER.debug(
-                    "Saving options flow data",
-                    extra={
-                        "power_sensor_count": len(
-                            self._config_data.get(CONF_POWER_SENSORS, [])
-                        ),
-                        "main_power_sensor": self._config_data.get(
-                            CONF_MAIN_POWER_SENSOR
-                        ),
-                    },
-                )
-                # The configuration lives in data alone (see
-                # async_migrate_entry); options stay empty. One update, one
-                # reload.
-                self.hass.config_entries.async_update_entry(
-                    self._config_entry,
-                    data=deepcopy(self._config_data),
-                    options={},
-                )
-                return self.async_create_entry(title="", data={})
-            if str(action).startswith("edit_sensor_"):
-                try:
-                    sensor_index = int(str(action).replace("edit_sensor_", ""))
-                    return await self.async_step_edit_sensor(sensor_index=sensor_index)
-                except ValueError:
-                    pass
-
-        options = _build_menu_options(self._config_data)
-
-        return self.async_show_form(
-            step_id="sensor_menu",
-            data_schema=vol.Schema({vol.Required("action"): vol.In(options)}),
-        )
-
-    async def async_step_edit_budget_source(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """
-        Let the budget follow the supply that is carrying the house.
-
-        One "state = watts" per line, matched against what the chosen sensor
-        reports. Leave the sensor empty to set the budget by hand or by an
-        automation instead.
-        """
-        errors: dict[str, str] = {}
-        prefill: dict[str, Any] = self._config_data
-        if user_input is not None:
-            errors = _store_budget_source(self._config_data, user_input)
-            if not errors:
-                return await self.async_step_sensor_menu()
-            prefill = {
-                **self._config_data,
-                CONF_BUDGET_SOURCE_ENTITY: user_input.get(CONF_BUDGET_SOURCE_ENTITY),
-            }
-
-        return self.async_show_form(
-            step_id="edit_budget_source",
-            data_schema=vol.Schema(_budget_source_schema_fields(prefill)),
-            errors=errors,
-        )
+        return self.async_create_entry(title="", data={})
 
     async def async_step_edit_notifications(
         self, user_input: dict[str, Any] | None = None
@@ -1159,7 +978,7 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             errors = _validate_notify_options(user_input)
             if not errors:
                 _store_notify_options(self._config_data, user_input)
-                return await self.async_step_sensor_menu()
+                return await self.async_step_init()
             # Re-show what was just submitted rather than what was saved, so a
             # rejected form does not throw the choices away.
             prefill = dict(self._config_data)
@@ -1169,108 +988,6 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             step_id="edit_notifications",
             data_schema=vol.Schema(_notify_schema_fields(self.hass, prefill)),
             errors=errors,
-        )
-
-    async def async_step_add_sensor(
-        self, user_input: dict[str, object] | None = None
-    ) -> ConfigFlowResult:
-        """
-        Show form to add a new monitored power sensor.
-
-        Args:
-            user_input: User input from the form, or None on first display.
-
-        Returns:
-            ConfigFlowResult with form or directing to next step.
-
-        """
-        _LOGGER.debug(
-            "Opening options flow step: async_step_add_sensor, user_input=%s",
-            user_input,
-        )
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            errors, sensor_config = _process_sensor_input(self.hass, dict(user_input))
-            if not errors and sensor_config:
-                if CONF_POWER_SENSORS not in self._config_data or not isinstance(
-                    self._config_data[CONF_POWER_SENSORS], list
-                ):
-                    self._config_data[CONF_POWER_SENSORS] = []
-                self._config_data[CONF_POWER_SENSORS].append(sensor_config)
-                return await self.async_step_sensor_menu()
-
-        return self.async_show_form(
-            step_id="add_sensor",
-            data_schema=STEP_ADD_SENSOR_SCHEMA,
-            errors=errors,
-        )
-
-    async def async_step_edit_sensor(
-        self,
-        user_input: dict[str, object] | None = None,
-        sensor_index: int | None = None,
-    ) -> ConfigFlowResult:
-        """
-        Show form to edit an existing monitored power sensor.
-
-        Args:
-            user_input: User input from the form, or None on first display.
-            sensor_index: Index of the sensor to edit in the sensors list.
-
-        Returns:
-            ConfigFlowResult with form or directing to next step.
-
-        """
-        _LOGGER.debug(
-            "Opening options flow step: async_step_edit_sensor, "
-            "user_input=%s, sensor_index=%s",
-            user_input,
-            sensor_index,
-        )
-        errors: dict[str, str] = {}
-        sensors: list[dict[str, Any]] = self._config_data.get(CONF_POWER_SENSORS, [])
-
-        if sensor_index is not None:
-            self._editing_sensor_index = sensor_index
-        elif hasattr(self, "_editing_sensor_index"):
-            sensor_index = self._editing_sensor_index
-
-        if sensor_index is None or sensor_index < 0 or sensor_index >= len(sensors):
-            return self.async_abort(reason="invalid_sensor_index")
-
-        current_sensor_config = sensors[sensor_index]
-
-        if user_input is not None:
-            if user_input.get("remove_sensor"):
-                del self._config_data[CONF_POWER_SENSORS][sensor_index]
-                return await self.async_step_sensor_menu()
-
-            errors, sensor_config = _process_sensor_input(self.hass, dict(user_input))
-            if not errors and sensor_config:
-                self._config_data[CONF_POWER_SENSORS][sensor_index] = sensor_config
-                return await self.async_step_sensor_menu()
-
-        initial_data = {
-            CONF_ENTITY_ID: current_sensor_config.get(CONF_ENTITY_ID),
-            CONF_NAME: current_sensor_config.get(CONF_NAME),
-            CONF_IMPORTANCE: current_sensor_config.get(
-                CONF_IMPORTANCE, DEFAULT_IMPORTANCE
-            ),
-            CONF_LAST_RESORT: current_sensor_config.get(CONF_LAST_RESORT, False),
-            CONF_APPLIANCE: current_sensor_config.get(CONF_APPLIANCE),
-            CONF_DEVICE_COOLDOWN: current_sensor_config.get(CONF_DEVICE_COOLDOWN),
-            CONF_NOMINAL_POWER_WATT: current_sensor_config.get(
-                CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
-            ),
-            CONF_POWER_DRAW_MODE: resolve_power_draw_mode(current_sensor_config),
-        }
-
-        return self.async_show_form(
-            step_id="edit_sensor",
-            data_schema=_build_sensor_edit_schema(initial_data),
-            errors=errors,
-            last_step=False,
         )
 
     async def async_step_edit_main_sensor(
@@ -1291,58 +1008,96 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             user_input,
         )
         errors: dict[str, str] = {}
-
         if user_input is not None:
-            power_budget = user_input.get(CONF_POWER_BUDGET_WATT)
-            if (
-                power_budget is None
-                or not isinstance(power_budget, int)
-                or power_budget <= 0
-            ):
-                errors[CONF_POWER_BUDGET_WATT] = "valid_budget_required"
+            errors = _store_main_sensor_input(self._config_data, dict(user_input))
             if not errors:
-                self._config_data[CONF_MAIN_POWER_SENSOR] = user_input[
-                    CONF_MAIN_POWER_SENSOR
-                ]
-                self._config_data[CONF_POWER_BUDGET_WATT] = power_budget
-                cooldown = user_input.get(CONF_COOLDOWN_SECONDS)
-                if isinstance(cooldown, (int, float)):
-                    self._config_data[CONF_COOLDOWN_SECONDS] = int(cooldown)
-                else:
-                    self._config_data[CONF_COOLDOWN_SECONDS] = DEFAULT_COOLDOWN_SECONDS
-                _store_sustained_options(self._config_data, user_input)
-                return await self.async_step_sensor_menu()
-
-        current_cooldown = self._config_data.get(
-            CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS
-        )
-
-        schema_dict: dict[Any, Any] = {
-            vol.Required(
-                CONF_MAIN_POWER_SENSOR,
-                default=self._config_data.get(CONF_MAIN_POWER_SENSOR),
-            ): _get_power_sensor_selector(),
-            vol.Required(
-                CONF_POWER_BUDGET_WATT,
-                default=self._config_data.get(CONF_POWER_BUDGET_WATT),
-            ): int,
-            vol.Required(
-                CONF_COOLDOWN_SECONDS,
-                default=current_cooldown,
-            ): NumberSelector(
-                NumberSelectorConfig(
-                    min=1,
-                    max=3600,
-                    step=1,
-                    mode=NumberSelectorMode.BOX,
-                    unit_of_measurement="s",
-                )
-            ),
-        }
-        schema_dict.update(_sustained_schema_fields(self._config_data))
+                if self._config_data.get(CONF_BUDGET_SOURCE_ENTITY):
+                    return await self.async_step_budget_states()
+                return await self.async_step_init()
 
         return self.async_show_form(
             step_id="edit_main_sensor",
-            data_schema=vol.Schema(schema_dict),
+            data_schema=_main_sensor_schema(self._config_data),
+            errors=errors,
+        )
+
+    async def _async_return_to_menu(self) -> ConfigFlowResult:
+        """Return to the menu after the per-state budget form."""
+        return await self.async_step_init()
+
+
+class ApplianceSubentryFlow(ConfigSubentryFlow):
+    """
+    Add or edit one appliance the balancer may switch.
+
+    Each appliance is a subentry, so it is listed on the integration page with
+    its own edit and delete instead of behind a dropdown. Its unique id is the
+    appliance entity, which keeps one appliance from being added twice.
+    Whether it is balanced at all is its switch, not part of this form, so
+    that it can be flipped from a dashboard or an automation.
+    """
+
+    def _appliance_taken(self, appliance: str, own_id: str | None = None) -> bool:
+        """Return True if another subentry already balances this appliance."""
+        return any(
+            subentry.unique_id == appliance and subentry.subentry_id != own_id
+            for subentry in self._get_entry().subentries.values()
+        )
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Add an appliance."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors, appliance = _process_sensor_input(self.hass, user_input)
+            if appliance is not None:
+                if self._appliance_taken(appliance[CONF_APPLIANCE]):
+                    errors[CONF_APPLIANCE] = "appliance_already_configured"
+                else:
+                    return self.async_create_entry(
+                        title=appliance[CONF_NAME],
+                        data={**appliance, CONF_BALANCING_ENABLED: True},
+                        unique_id=appliance[CONF_APPLIANCE],
+                    )
+        return self.async_show_form(
+            step_id="user",
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_ADD_SENSOR_SCHEMA, user_input or {}
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Edit an appliance; its balancing switch keeps its position."""
+        subentry = self._get_reconfigure_subentry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors, appliance = _process_sensor_input(self.hass, user_input)
+            if appliance is not None:
+                if self._appliance_taken(
+                    appliance[CONF_APPLIANCE], subentry.subentry_id
+                ):
+                    errors[CONF_APPLIANCE] = "appliance_already_configured"
+                else:
+                    return self.async_update_and_abort(
+                        self._get_entry(),
+                        subentry,
+                        title=appliance[CONF_NAME],
+                        unique_id=appliance[CONF_APPLIANCE],
+                        data={
+                            **appliance,
+                            CONF_BALANCING_ENABLED: subentry.data.get(
+                                CONF_BALANCING_ENABLED, True
+                            ),
+                        },
+                    )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_build_sensor_edit_schema(
+                dict(subentry.data) if user_input is None else user_input
+            ),
             errors=errors,
         )

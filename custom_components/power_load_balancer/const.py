@@ -28,6 +28,19 @@ CONF_DEVICE_COOLDOWN = "device_cooldown"
 CONF_NOMINAL_POWER_WATT = "nominal_power_watt"
 CONF_POWER_DRAW_MODE = "power_draw_mode"
 
+# Each appliance is a config subentry of this type. Its data is the per-
+# appliance settings plus whether it is balanced at all, which its switch
+# flips: an appliance put away for the season keeps its settings and learned
+# draw and raises nothing while it is out.
+SUBENTRY_APPLIANCE = "appliance"
+CONF_BALANCING_ENABLED = "balancing_enabled"
+
+# Added to the configuration handed to the balancer at setup, never stored:
+# which subentry each appliance came from, and every configured appliance,
+# balanced or not, so what was learned about one that is put away is kept.
+CONF_SUBENTRY_ID = "subentry_id"
+CONF_ALL_APPLIANCES = "all_appliances"
+
 DEFAULT_NOMINAL_POWER_WATT = 0
 
 # How an appliance's draw is sized when its sensor cannot say (it is off,
@@ -140,6 +153,20 @@ CONF_BUDGET_SOURCE_ENTITY = "budget_source_entity"
 CONF_BUDGET_SOURCE_MAP = "budget_source_map"
 CONF_BUDGET_RAISE_DELAY_SECONDS = "budget_raise_delay_seconds"
 DEFAULT_BUDGET_RAISE_DELAY_SECONDS = 60
+
+# Whether the budget is one fixed figure or follows the source entity. Not
+# stored: the presence of a source entity is the mode, so switching back to
+# fixed keeps the per-state budgets for next time.
+CONF_BUDGET_MODE = "budget_mode"
+BUDGET_MODE_FIXED = "fixed"
+BUDGET_MODE_SOURCE = "source"
+BUDGET_MODES = (BUDGET_MODE_FIXED, BUDGET_MODE_SOURCE)
+
+# The per-state form offers the states the source entity declares (an enum
+# sensor or a select lists them), the ones the recorder saw it report in this
+# many days, and its current one, so nobody has to type a state from memory.
+BUDGET_SOURCE_HISTORY_DAYS = 30
+BUDGET_SOURCE_MAX_STATES = 30
 
 # Read-only now: entries saved before delivery became a per-category choice
 # still carry these, and notify_channels.resolve_notify_channels translates

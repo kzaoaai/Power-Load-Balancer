@@ -7,7 +7,9 @@ A Home Assistant custom integration to prevent exceeding your household's power 
 -   Monitors the total house power consumption from a main sensor.
 -   Compares current usage against a configured power budget.
 -   Automatically turns off pre-defined controllable appliances when the budget is exceeded.
--   Allows configuring multiple monitored circuits/sensors, each linked to a controllable appliance.
+-   **Appliances as subentries**: each appliance is its own item on the integration page, with **Add appliance**, edit and delete there, instead of a list edited through the options.
+-   **Per-appliance entities on the appliance's own device**: a **Load balancing** switch, a **Learned power draw** sensor and a **Shed by load balancer** indicator (with why and since when). They appear on the device page of the appliance itself (the water heater, the smart plug); an appliance with no device falls back to the device of its power sensor, and failing that the entities are named after the appliance.
+-   **Seasonal appliances**: switch an appliance's **Load balancing** off and it is not watched, shed, restored or learned, and raises no repairs; its settings and learned draw are kept. One the balancer is holding off is given back first. The switch can be flipped from a dashboard or an automation.
 -   Prioritize which appliances to turn off based on configured importance levels.
 -   Flag certain appliances as "last resort" to only turn them off if absolutely necessary.
 -   Optional "assumed power on" value for appliances to react quickly to potential overloads before sensor data updates.
@@ -16,7 +18,7 @@ A Home Assistant custom integration to prevent exceeding your household's power 
 -   **Sustained-load shedding**: sheds one appliance at a time once the load has stayed above a set percentage of the budget for a set time, on apparent power (VA) as well as watts.
 -   **Water heaters**: `water_heater` entities are supported; a `generic_water_heater` tank is shed through that integration's own shed and release services, so the shed is not mistaken for a manual change.
 -   **Restart-safe**: what the balancer has shed, and the mode to give back, is saved and taken back after a restart or reload.
--   **Budget by power source**: the budget can follow a sensor that names the supply carrying the house (for example solar, utility, generator), with a budget per supply. A lower budget applies at once; a higher one after a configurable delay.
+-   **Fixed or variable budget**: in the main settings, the budget is either one figure or follows another entity (a sensor, select or input select, for example one naming the supply carrying the house), with a budget per state. The next page offers a field for every state the entity declares, was seen reporting in the last 30 days, or reports now, and states can be added by hand. A lower budget applies at once; a higher one after a configurable delay. A state left blank keeps the current budget.
 -   **Spaced restores**: appliances come back one at a time, 30 s apart. A restored appliance's expected draw stays reserved until its own sensor shows it drawing, or for up to 150 s, so a water heater that is held back by its own stagger or already at temperature is not counted as free headroom.
 -   **Learned power draw**: when an appliance's sensor cannot say what it would draw (it is off, shed, or slow to report), the balancer uses what it has learned from that sensor while the appliance ran: the 95th percentile of its recent running readings, so a water heater that steps between two levels is sized on the higher one. Each appliance can instead use a fixed value ("Power draw" in its settings). Appliances set up with a nameplate value before this option existed keep it as a fixed value.
 -   **Why it is off**: each appliance waiting to be restored is listed on the pending-actions sensor with why it was shed, when, the headroom it needs, and what it is waiting for.
@@ -72,21 +74,15 @@ After installation (and a restart if requested):
 1.  In Home Assistant, go to **Settings -> Devices & Services**.
 2.  Click the orange **"+ ADD INTEGRATION"** button.
 3.  Search for "Power Load Balancer".
-4.  Follow the steps in the configuration flow:
-    *   **Main Configuration:**
-        *   Select your **Main Power Sensor** (the sensor representing the total house consumption).
-        *   Enter your **Power Budget (Watt)**. It is recommended to set this slightly below your actual limit to avoid tripping breakers.
-        *   Optionally edit the **Cooldown Time** (defaults to 10 seconds) to prevent rapid toggling of appliances.
-    *   **Add New Monitored Sensor:**
-        *   Select a **Power Sensor** for a specific appliance or circuit you want to monitor.
-        *   Optionally provide a **Name** for this configuration (defaults to the sensor's friendly name).
-        *   Set the **Importance** (1 being highest priority to keep on, 10 being lowest priority).
-        *   Check the **Last Resort** box if this appliance should only be turned off as a last resort.
-        *   Select the **Controllable Appliance** (switch, light, climate, water_heater, or media_player entity) associated with this sensor.
-        *   Optionally override the **Cooldown Time** for this specific appliance.
-    *   You can add multiple monitored sensors and their associated appliances.
-    *   You can remove configured sensors from the main configuration screen.
-    *   Select **"Finish Configuration"** when done. Not selecting finish configuration at the end will result in no configuration being saved.
+4.  Choose the **Main Power Sensor** (the total house consumption) and the **Power budget**, fixed or following another entity, set slightly below your actual limit. Optionally adjust the cooldown and sustained-load settings.
+5.  On the integration page, select **Add appliance** for each appliance the balancer may switch off:
+    *   the **Power Sensor** that measures it, and the **Controllable Appliance** (switch, light, climate, water_heater or media_player);
+    *   its **Importance** (1 = keep on longest, 10 = shed first) and whether it is a **Last Resort**;
+    *   its **Power draw**: learned from its sensor (the default) or a fixed value;
+    *   optionally a name and its own cooldown.
+6.  Each appliance's row has edit and delete; notifications and the main settings are under **Configure** on the balancer itself.
+
+Upgrading from 1.x moves the configured appliances into subentries automatically, all with balancing on. The move is one-way: going back to a 1.x release afterwards finds no appliances.
 
 ## Usage
 

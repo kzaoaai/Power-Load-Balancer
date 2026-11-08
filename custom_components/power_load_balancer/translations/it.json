@@ -1,4 +1,187 @@
 {
+  "config": {
+    "step": {
+      "edit_main_sensor": {
+        "data": {
+          "main_power_sensor": "Sensore di potenza principale",
+          "budget_mode": "Budget di potenza",
+          "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)",
+          "budget_source_entity": "Sorgente del budget",
+          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)",
+          "cooldown_seconds": "Tempo di attesa (secondi)",
+          "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
+          "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
+          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)"
+        },
+        "description": "Scegli il contatore principale e il budget. Aggiungi gli apparecchi dopo, dalla pagina dell'integrazione.",
+        "title": "Configurazione di Power Load Balancer",
+        "data_description": {
+          "budget_mode": "Fisso mantiene un solo budget. Variabile segue un'altra entità, ad esempio un sensore che indica la fonte che alimenta la casa, con un budget per ciascuno dei suoi stati; li imposti nella pagina successiva.",
+          "power_budget_watt": "Con un budget variabile, è il budget all'avvio e mentre la sorgente riporta uno stato senza un budget proprio.",
+          "budget_source_entity": "Usato solo dal budget variabile: un sensore, select o input select il cui stato sceglie il budget.",
+          "budget_raise_delay_seconds": "Usato solo dal budget variabile. Un budget più basso si applica subito; uno più alto attende questo tempo, così una fonte che torna per un attimo non riceve di nuovo gli apparecchi."
+        }
+      },
+      "budget_states": {
+        "title": "Budget per ogni stato",
+        "description": "Inserisci il budget da applicare mentre {source} riporta ciascuno stato. Lascia vuoto uno stato per mantenere il budget attuale mentre è riportato. Il budget fisso, {budget}, è il punto di partenza.",
+        "data": {
+          "add_states": "Aggiungi stati non elencati"
+        },
+        "data_description": {
+          "add_states": "Scrivi lo stato esattamente come lo riporta l'entità, maiuscole comprese, e premi Invia per ottenere un campo."
+        }
+      }
+    },
+    "error": {
+      "notify_service_required": "Scegli almeno un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
+      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
+      "budget_map_required": "Inserisci un budget per almeno uno stato.",
+      "source_entity_required": "Scegli l'entità che il budget segue, oppure imposta il budget come fisso."
+    }
+  },
+  "config_subentries": {
+    "appliance": {
+      "entry_type": "Apparecchio",
+      "initiate_flow": {
+        "user": "Aggiungi apparecchio"
+      },
+      "step": {
+        "user": {
+          "title": "Aggiungi apparecchio",
+          "description": "Scegli l'apparecchio che il bilanciatore può spegnere e il sensore che ne misura il consumo.",
+          "data": {
+            "entity_id": "Sensore di potenza monitorato",
+            "name": "Nome personalizzato (opzionale)",
+            "importance": "Importanza (1=Bassa, 10=Alta)",
+            "last_resort": "Ultima risorsa (spegni solo se assolutamente necessario)",
+            "appliance": "Elettrodomestico controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
+            "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
+            "power_draw_mode": "Assorbimento",
+            "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
+          },
+          "data_description": {
+            "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
+          }
+        },
+        "reconfigure": {
+          "title": "Modifica apparecchio",
+          "description": "Cambia come il bilanciatore tratta questo apparecchio. Se è bilanciato o no lo decide il suo interruttore Bilanciamento del carico.",
+          "data": {
+            "entity_id": "Sensore di potenza monitorato",
+            "name": "Nome personalizzato (opzionale)",
+            "importance": "Importanza (1=Bassa, 10=Alta)",
+            "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
+            "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
+            "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
+            "power_draw_mode": "Assorbimento",
+            "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
+          },
+          "data_description": {
+            "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
+          }
+        }
+      },
+      "error": {
+        "select_appliance_required": "Seleziona l'elettrodomestico controllabile per questo sensore.",
+        "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
+        "fixed_power_required": "Inserisci l'assorbimento in watt, oppure scegli di apprenderlo.",
+        "appliance_already_configured": "Questo apparecchio è già bilanciato da un'altra voce."
+      },
+      "abort": {
+        "reconfigure_successful": "Apparecchio aggiornato."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Power Load Balancer",
+        "description": "Gli apparecchi sono elencati nella pagina dell'integrazione: aggiungine uno con **Aggiungi apparecchio**, modifica o elimina ciascuno dalla sua riga, e attiva o disattiva il bilanciamento dal suo interruttore **Bilanciamento del carico**.",
+        "menu_options": {
+          "edit_main_sensor": "Impostazioni principali",
+          "edit_notifications": "Notifiche",
+          "finish": "Salva"
+        }
+      },
+      "edit_main_sensor": {
+        "data": {
+          "main_power_sensor": "Sensore di potenza principale",
+          "budget_mode": "Budget di potenza",
+          "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)",
+          "budget_source_entity": "Sorgente del budget",
+          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)",
+          "cooldown_seconds": "Tempo di attesa (secondi)",
+          "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
+          "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
+          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)"
+        },
+        "description": "Modifica il sensore di potenza principale, il budget di potenza e le impostazioni di attesa.",
+        "title": "Modifica impostazioni sensore principale",
+        "data_description": {
+          "budget_mode": "Fisso mantiene un solo budget. Variabile segue un'altra entità, ad esempio un sensore che indica la fonte che alimenta la casa, con un budget per ciascuno dei suoi stati; li imposti nella pagina successiva.",
+          "power_budget_watt": "Con un budget variabile, è il budget all'avvio e mentre la sorgente riporta uno stato senza un budget proprio.",
+          "budget_source_entity": "Usato solo dal budget variabile: un sensore, select o input select il cui stato sceglie il budget.",
+          "budget_raise_delay_seconds": "Usato solo dal budget variabile. Un budget più basso si applica subito; uno più alto attende questo tempo, così una fonte che torna per un attimo non riceve di nuovo gli apparecchi."
+        }
+      },
+      "edit_notifications": {
+        "title": "Impostazioni notifiche",
+        "description": "Tutto ciò che fa il bilanciatore viene sempre scritto nel suo registro eventi e pubblicato sul bus. Qui scegli quali eventi meritano anche di interromperti, e in che modo.",
+        "data": {
+          "notify_services": "Dispositivi da avvisare",
+          "notify_channel_shed": "Un elettrodomestico è stato spento",
+          "notify_channel_restore": "Un elettrodomestico è stato riacceso",
+          "notify_channel_budget": "Il budget di potenza è cambiato",
+          "notify_channel_problem": "Qualcosa richiede attenzione"
+        }
+      },
+      "budget_states": {
+        "title": "Budget per ogni stato",
+        "description": "Inserisci il budget da applicare mentre {source} riporta ciascuno stato. Lascia vuoto uno stato per mantenere il budget attuale mentre è riportato. Il budget fisso, {budget}, è il punto di partenza.",
+        "data": {
+          "add_states": "Aggiungi stati non elencati"
+        },
+        "data_description": {
+          "add_states": "Scrivi lo stato esattamente come lo riporta l'entità, maiuscole comprese, e premi Invia per ottenere un campo."
+        }
+      }
+    },
+    "error": {
+      "notify_service_required": "Scegli almeno un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
+      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
+      "budget_map_required": "Inserisci un budget per almeno uno stato.",
+      "source_entity_required": "Scegli l'entità che il budget segue, oppure imposta il budget come fisso."
+    }
+  },
+  "entity": {
+    "switch": {
+      "enabled": {
+        "name": "Abilitato"
+      },
+      "appliance_balancing": {
+        "name": "Bilanciamento del carico"
+      }
+    },
+    "number": {
+      "power_budget": {
+        "name": "Budget di potenza"
+      }
+    },
+    "sensor": {
+      "pending_actions": {
+        "name": "Azioni in sospeso"
+      },
+      "learned_draw": {
+        "name": "Potenza appresa"
+      }
+    },
+    "binary_sensor": {
+      "shed_by_balancer": {
+        "name": "Spento dal bilanciatore"
+      }
+    }
+  },
   "issues": {
     "device_unavailable": {
       "title": "Entità non disponibile per il bilanciamento",
@@ -13,20 +196,25 @@
       "description": "Power Load Balancer e configurato per usare {entity_id}, ma questa entita non esiste in questo Home Assistant. Non c'e nessun guasto: la configurazione indica qualcosa che non e presente, quindi il bilanciamento la ignora. Apri le opzioni dell'integrazione e scegli un'entita esistente per questa riga, oppure rimuovi la riga. Questo avviso non sparira da solo."
     }
   },
-  "entity": {
-    "switch": {
-      "enabled": {
-        "name": "Abilitato"
+  "selector": {
+    "notify_channel": {
+      "options": {
+        "none": "Non avvisarmi",
+        "persistent": "Notifica in Home Assistant",
+        "service": "Notifica push sul dispositivo",
+        "both": "Entrambe"
       }
     },
-    "number": {
-      "power_budget": {
-        "name": "Budget di potenza"
+    "power_draw_mode": {
+      "options": {
+        "learn": "Apprendilo dal sensore di potenza",
+        "fixed": "Usa un valore fisso"
       }
     },
-    "sensor": {
-      "pending_actions": {
-        "name": "Azioni in sospeso"
+    "budget_mode": {
+      "options": {
+        "fixed": "Fisso",
+        "source": "Variabile: segue un'altra entità"
       }
     }
   },
@@ -57,212 +245,6 @@
           "name": "Motivazione",
           "description": "Motivo per cui il dispositivo viene acceso (opzionale)"
         }
-      }
-    }
-  },
-  "config": {
-    "step": {
-      "user": {
-        "data": {
-          "action": "Azione"
-        },
-        "description": "Benvenuto nella configurazione di Power Load Balancer. Configura il sensore di potenza principale e aggiungi sensori di potenza monitorati con i relativi dispositivi.",
-        "title": "Configurazione Power Load Balancer"
-      },
-      "edit_main_sensor": {
-        "data": {
-          "main_power_sensor": "Sensore di potenza principale",
-          "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)",
-          "cooldown_seconds": "Tempo di attesa (secondi)",
-          "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
-          "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
-          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)"
-        },
-        "description": "Configura il sensore di potenza principale, il budget di potenza e il tempo di attesa predefinito prima che i dispositivi possano essere riaccesi dopo lo spegnimento.",
-        "title": "Modifica impostazioni sensore principale"
-      },
-      "add_sensor": {
-        "data": {
-          "entity_id": "Sensore di potenza monitorato",
-          "name": "Nome personalizzato (opzionale)",
-          "importance": "Importanza (1=Bassa, 10=Alta)",
-          "last_resort": "Ultima risorsa (spegni solo se assolutamente necessario)",
-          "appliance": "Elettrodomestico controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
-          "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
-          "power_draw_mode": "Assorbimento",
-          "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
-        },
-        "description": "Aggiungi un nuovo sensore di potenza da monitorare e il relativo elettrodomestico controllabile.",
-        "title": "Aggiungi sensore monitorato",
-        "data_description": {
-          "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
-        }
-      },
-      "edit_sensor": {
-        "data": {
-          "entity_id": "Sensore di potenza monitorato",
-          "name": "Nome personalizzato (opzionale)",
-          "importance": "Importanza (1=Bassa, 10=Alta)",
-          "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
-          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
-          "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
-          "remove_sensor": "Rimuovi sensore",
-          "power_draw_mode": "Assorbimento",
-          "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
-        },
-        "description": "Modifica le impostazioni di questo sensore di potenza monitorato e del relativo dispositivo.",
-        "title": "Modifica sensore monitorato",
-        "data_description": {
-          "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
-        }
-      },
-      "edit_notifications": {
-        "title": "Impostazioni notifiche",
-        "description": "Tutto ciò che fa il bilanciatore viene sempre scritto nel suo registro eventi e pubblicato sul bus. Qui scegli quali eventi meritano anche di interromperti, e in che modo.",
-        "data": {
-          "notify_services": "Dispositivi da avvisare",
-          "notify_channel_shed": "Un elettrodomestico è stato spento",
-          "notify_channel_restore": "Un elettrodomestico è stato riacceso",
-          "notify_channel_budget": "Il budget di potenza è cambiato",
-          "notify_channel_problem": "Qualcosa richiede attenzione"
-        }
-      },
-      "edit_budget_source": {
-        "title": "Budget per fonte di alimentazione",
-        "description": "Il budget segue un sensore che indica la fonte che alimenta la casa. Una riga per fonte, nel formato `stato = watt`, con lo stato scritto esattamente come lo riporta il sensore (ad esempio `Generator = 4400`). Un budget più basso si applica subito; uno più alto dopo il ritardo. Lascia vuoto il sensore per impostare il budget a mano o da un'automazione.",
-        "data": {
-          "budget_source_entity": "Sensore della fonte di alimentazione",
-          "budget_source_map": "Budget per fonte (stato = watt, uno per riga)",
-          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)"
-        }
-      }
-    },
-    "error": {
-      "invalid_edit_action": "Azione non valida selezionata per la modifica.",
-      "main_sensor_required": "Configura il sensore di potenza principale prima di terminare.",
-      "notify_service_required": "Scegli almeno un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
-      "select_appliance_required": "Seleziona l'elettrodomestico controllabile per questo sensore.",
-      "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
-      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
-      "invalid_budget_map": "Ogni riga deve essere `stato = watt`, con un numero intero di watt maggiore di zero.",
-      "budget_map_required": "Aggiungi almeno una riga `stato = watt` per il sensore scelto.",
-      "fixed_power_required": "Inserisci l'assorbimento in watt, oppure scegli di apprenderlo."
-    },
-    "abort": {
-      "invalid_sensor_index": "Sensore non valido selezionato per la modifica."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "data": {
-          "main_power_sensor": "Sensore di potenza principale",
-          "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)"
-        },
-        "description": "Modifica il sensore di potenza principale, il budget di potenza e le impostazioni di attesa.",
-        "title": "Modifica impostazioni principali"
-      },
-      "sensor_menu": {
-        "data": {
-          "action": "Azione"
-        },
-        "description": "Gestisci i tuoi sensori di potenza monitorati e i relativi elettrodomestici.",
-        "title": "Gestisci sensori monitorati"
-      },
-      "add_sensor": {
-        "data": {
-          "entity_id": "Sensore di potenza monitorato",
-          "name": "Nome personalizzato (opzionale)",
-          "importance": "Importanza (1=Bassa, 10=Alta)",
-          "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
-          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
-          "device_cooldown": "Override tempo di attesa dispositivo (secondi, lascia -1 per predefinito)",
-          "power_draw_mode": "Assorbimento",
-          "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
-        },
-        "description": "Aggiungi un nuovo sensore di potenza da monitorare e il relativo dispositivo controllabile.",
-        "title": "Aggiungi sensore monitorato",
-        "data_description": {
-          "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
-        }
-      },
-      "edit_sensor": {
-        "data": {
-          "entity_id": "Sensore di potenza monitorato",
-          "name": "Nome personalizzato (opzionale)",
-          "importance": "Importanza (1=Bassa, 10=Alta)",
-          "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
-          "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
-          "device_cooldown": "Override tempo di attesa dispositivo (secondi, lascia -1 per predefinito)",
-          "remove_sensor": "Rimuovi sensore",
-          "power_draw_mode": "Assorbimento",
-          "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
-        },
-        "description": "Modifica le impostazioni di questo sensore di potenza monitorato e del relativo dispositivo controllabile.",
-        "title": "Modifica sensore monitorato",
-        "data_description": {
-          "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
-        }
-      },
-      "edit_main_sensor": {
-        "data": {
-          "main_power_sensor": "Sensore di potenza principale",
-          "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)",
-          "cooldown_seconds": "Tempo di attesa (secondi)",
-          "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
-          "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
-          "sustained_duration_seconds": "Durata del carico prolungato prima della riduzione (secondi)"
-        },
-        "description": "Modifica il sensore di potenza principale, il budget di potenza e le impostazioni di attesa.",
-        "title": "Modifica impostazioni sensore principale"
-      },
-      "edit_notifications": {
-        "title": "Impostazioni notifiche",
-        "description": "Tutto ciò che fa il bilanciatore viene sempre scritto nel suo registro eventi e pubblicato sul bus. Qui scegli quali eventi meritano anche di interromperti, e in che modo.",
-        "data": {
-          "notify_services": "Dispositivi da avvisare",
-          "notify_channel_shed": "Un elettrodomestico è stato spento",
-          "notify_channel_restore": "Un elettrodomestico è stato riacceso",
-          "notify_channel_budget": "Il budget di potenza è cambiato",
-          "notify_channel_problem": "Qualcosa richiede attenzione"
-        }
-      },
-      "edit_budget_source": {
-        "title": "Budget per fonte di alimentazione",
-        "description": "Il budget segue un sensore che indica la fonte che alimenta la casa. Una riga per fonte, nel formato `stato = watt`, con lo stato scritto esattamente come lo riporta il sensore (ad esempio `Generator = 4400`). Un budget più basso si applica subito; uno più alto dopo il ritardo. Lascia vuoto il sensore per impostare il budget a mano o da un'automazione.",
-        "data": {
-          "budget_source_entity": "Sensore della fonte di alimentazione",
-          "budget_source_map": "Budget per fonte (stato = watt, uno per riga)",
-          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)"
-        }
-      }
-    },
-    "error": {
-      "notify_service_required": "Scegli almeno un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
-      "select_appliance_required": "Seleziona l'elettrodomestico controllabile per questo sensore.",
-      "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
-      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
-      "invalid_budget_map": "Ogni riga deve essere `stato = watt`, con un numero intero di watt maggiore di zero.",
-      "budget_map_required": "Aggiungi almeno una riga `stato = watt` per il sensore scelto.",
-      "fixed_power_required": "Inserisci l'assorbimento in watt, oppure scegli di apprenderlo."
-    },
-    "abort": {
-      "invalid_sensor_index": "Sensore non valido selezionato per la modifica."
-    }
-  },
-  "selector": {
-    "notify_channel": {
-      "options": {
-        "none": "Non avvisarmi",
-        "persistent": "Notifica in Home Assistant",
-        "service": "Notifica push sul dispositivo",
-        "both": "Entrambe"
-      }
-    },
-    "power_draw_mode": {
-      "options": {
-        "learn": "Apprendilo dal sensore di potenza",
-        "fixed": "Usa un valore fisso"
       }
     }
   }

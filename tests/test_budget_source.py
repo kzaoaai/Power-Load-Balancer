@@ -15,8 +15,8 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
-from custom_components.power_load_balancer.config_flow import _parse_budget_map
-from tests.conftest import balancer_of
+from custom_components.power_load_balancer import config_flow
+from tests.conftest import BUDGET, MAIN_SENSOR, balancer_of
 
 SOURCE = "sensor.home_power_source"
 BUDGET_ENTITY = "number.power_load_balancer_power_budget"
@@ -96,55 +96,150 @@ async def test_an_unmapped_state_keeps_the_budget(hass, world, setup_balancer):
     assert balancer_of(hass, entry).power_budget == 4400
 
 
-def test_the_budget_map_parser() -> None:
-    """One `state = watts` per line; anything else is refused whole."""
-    assert _parse_budget_map("Generator = 4400\n\nSolar=8000\n") == {
-        "Generator": 4400,
-        "Solar": 8000,
-    }
-    assert _parse_budget_map("") == {}
-    for bad in ("Generator", "Generator = lots", "Generator = 0", "= 4400"):
-        assert _parse_budget_map(bad) is None, bad
-
-
-async def test_the_options_flow_stores_the_source_settings(hass, world, setup_balancer):
-    """What the form takes is what the balancer is reloaded with."""
-    entry = await setup_balancer()
+async def _main_form(hass, entry):
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_budget_source"}
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "edit_main_sensor"}
     )
-    assert result["step_id"] == "edit_budget_source"
 
+
+def _main_input(**changes: object) -> dict:
+    return {
+        "main_power_sensor": MAIN_SENSOR,
+        "power_budget_watt": BUDGET,
+        "cooldown_seconds": 10,
+        **changes,
+    }
+
+
+def _offered(result) -> list[str]:
+    return [str(key) for key in result["data_schema"].schema]
+
+
+async def _finish(hass, result):
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "budget_source_entity": SOURCE,
-            "budget_source_map": "Generator = 4400\nSolar = 8000",
-            "budget_raise_delay_seconds": 30,
-        },
-    )
-    assert result["step_id"] == "sensor_menu"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "finish"}
+        result["flow_id"], {"next_step_id": "finish"}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
 
+
+async def test_a_variable_budget_is_set_per_state_in_the_main_settings(
+    hass, world, setup_balancer
+):
+    """Pick the entity in the main form, then one field per state it takes."""
+    hass.states.async_set(
+        SOURCE, "Solar", {"options": ["Solar", "Battery", "Utility", "Generator"]}
+    )
+    entry = await setup_balancer()
+    result = await _main_form(hass, entry)
+    assert "budget_mode" in _offered(result)
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        _main_input(
+            budget_mode="source",
+            budget_source_entity=SOURCE,
+            budget_raise_delay_seconds=30,
+        ),
+    )
+    assert result["step_id"] == "budget_states"
+    assert _offered(result) == [
+        "Solar",
+        "Battery",
+        "Utility",
+        "Generator",
+        "add_states",
+    ]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"Generator": 4400, "Utility": 8200.0, "add_states": []}
+    )
+    assert result["step_id"] == "init"
+    await _finish(hass, result)
+
     assert entry.data["budget_source_entity"] == SOURCE
-    assert entry.data["budget_source_map"] == {"Generator": 4400, "Solar": 8000}
+    assert entry.data["budget_source_map"] == {"Generator": 4400, "Utility": 8200}
     assert entry.data["budget_raise_delay_seconds"] == 30
 
 
-async def test_the_options_flow_refuses_a_malformed_map(hass, world, setup_balancer):
-    """A typo must be shown, not saved as an empty map."""
+async def test_a_state_the_entity_does_not_declare_can_be_added(
+    hass, world, setup_balancer
+):
+    """A plain sensor lists no options; typing a state gives it a field."""
+    hass.states.async_set(SOURCE, "Solar")
     entry = await setup_balancer()
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_budget_source"}
-    )
+    result = await _main_form(hass, entry)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"budget_source_entity": SOURCE, "budget_source_map": "Generator 4400"},
+        _main_input(budget_mode="source", budget_source_entity=SOURCE),
     )
-    assert result["errors"] == {"budget_source_map": "invalid_budget_map"}
+    assert _offered(result) == ["Solar", "add_states"]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"Solar": 8000, "add_states": ["Generator"]}
+    )
+    assert result["step_id"] == "budget_states"
+    assert _offered(result) == ["Solar", "Generator", "add_states"]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"Solar": 8000, "Generator": 4400}
+    )
+    await _finish(hass, result)
+    assert entry.data["budget_source_map"] == {"Solar": 8000, "Generator": 4400}
+
+
+async def test_the_per_state_form_needs_one_budget(hass, world, setup_balancer):
+    """All blank would follow the entity and never change anything."""
+    hass.states.async_set(SOURCE, "Solar")
+    entry = await setup_balancer()
+    result = await _main_form(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        _main_input(budget_mode="source", budget_source_entity=SOURCE),
+    )
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["errors"] == {"base": "budget_map_required"}
+
+
+async def test_a_variable_budget_needs_an_entity(hass, world, setup_balancer):
+    """Variable with nothing to follow is refused on the main form."""
+    entry = await setup_balancer()
+    result = await _main_form(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], _main_input(budget_mode="source")
+    )
+    assert result["step_id"] == "edit_main_sensor"
+    assert result["errors"] == {"budget_source_entity": "source_entity_required"}
+
+
+async def test_switching_to_fixed_stops_following_but_keeps_the_states(
+    hass, world, setup_balancer
+):
+    """Fixed turns the feature off; switching back offers the old budgets."""
+    hass.states.async_set(SOURCE, "Generator")
+    entry = await _setup(hass, setup_balancer, "Generator")
+    result = await _main_form(hass, entry)
+    mode = next(k for k in result["data_schema"].schema if str(k) == "budget_mode")
+    assert mode.default() == "source", "a following budget opened as fixed"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], _main_input(budget_mode="fixed")
+    )
+    assert result["step_id"] == "init"
+    await _finish(hass, result)
+
+    assert "budget_source_entity" not in entry.data
+    assert entry.data["budget_source_map"] == SOURCE_MAP
+    assert balancer_of(hass, entry).power_budget == BUDGET
+
+
+async def test_states_are_offered_from_options_history_and_now(hass, monkeypatch):
+    """Declared first, then seen, then current, then saved; junk dropped."""
+    hass.states.async_set(SOURCE, "Utility", {"options": ["Solar", "Battery"]})
+
+    async def _seen(_hass, _entity):
+        return ["Generator", "unavailable", "Solar", "unknown"]
+
+    monkeypatch.setattr(config_flow, "_recorded_states", _seen)
+    states = await config_flow._known_source_states(hass, SOURCE, ["Grid", "Solar"])
+    assert states == ["Solar", "Battery", "Generator", "Utility", "Grid"]

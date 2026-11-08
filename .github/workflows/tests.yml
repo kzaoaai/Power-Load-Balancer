@@ -35,11 +35,11 @@ jobs:
       - name: Checkout the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The test harness needs Python 3.12; see requirements_test.txt.
+      # The test harness needs Python 3.14; see requirements_test.txt.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: requirements_test.txt
 

@@ -26,6 +26,8 @@ TO_REDACT = {
     "monitored_sensors",
     "notify_service",
     "notify_services",
+    "title",
+    "unique_id",
 }
 
 

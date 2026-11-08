@@ -22,9 +22,10 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (142 tests). It needs `.venv` on Python
-  3.12, built from `requirements_test.txt` as `AGENTS.md` describes.
-- `uvx ruff@<version pinned in requirements.txt> check .` reports 25
+- `./scripts/test` runs the suite (156 tests). It needs `.venv` on Python
+  3.14, built from `requirements_test.txt` as `AGENTS.md` describes (harness
+  0.13.375 = HA 2026.10.4; the 3.12 / HA 2025.1 harness had no subentries).
+- `uvx ruff@<version pinned in requirements.txt> check .` reports 24
   findings that predate the fork's current work, 16 of them in
   `assets/generate_brand.py`. Do not count them as yours; `ruff format
   --check .` is clean.
@@ -61,7 +62,7 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: v1.5.0 (per-appliance "Power draw": learn, the default,
+- Latest release: v2.0.0 (appliances are config subentries of type `appliance`, unique id = appliance entity, data = the old per-appliance dict plus `balancing_enabled`. `async_migrate_entry` 1.3 moves `data["power_sensors"]` into subentries, one-way. Setup rebuilds `power_sensors` (balanced only) and `all_appliances` (learner keeps disabled ones) from the subentries. Per appliance: switch `appliance_balancing`, sensor `learned_draw`, binary_sensor `shed_by_balancer`, linked to the appliance's device (else its power sensor's) by setting `entity.device_entry` -- the core helper pattern; never a `device_info` with the other device's identifiers, which would claim that device. Switching balancing off restores a held-off appliance after removing it from the shared `_monitored_sensors` list in place, then writes the subentry, which reloads. Options flow is now a native menu (main settings, notifications, save); setup is one form. Also carries the unreleased v1.6.0 below). v1.6.0 (the budget source moved into the main settings form as "Power budget: Fixed / Variable"; the separate "Budget by Power Source" menu entry and its `state = watts` text box are gone. Variable leads to a `budget_states` step with one number field per state: declared `options`, recorder history (30 days), current state, saved ones, plus an `add_states` custom-value field. The mode is not stored: a `budget_source_entity` means variable; fixed drops the entity and keeps the map; a different entity resets the map. Manifest gained `after_dependencies: [recorder]`). v1.5.0 (per-appliance "Power draw": learn, the default,
   or fixed. Learning keeps the last 500 running readings (>= 50 W) of the
   appliance's own sensor in a second Store, `<entry>.draw`, and uses the
   95th percentile once 20 exist; it sizes the turn-on veto and, for learned
@@ -70,8 +71,7 @@ Production installs the fork through the Home Assistant Marketplace
   learn otherwise (`resolve_power_draw_mode`), so no migration). v1.4.1 (restores 30 s apart; a restored appliance's draw is
   reserved until its sensor shows it, at most 150 s, because generic water
   heater staggers its own tanks and an idle tank reads zero; pending-actions
-  restores carry `shed_reason`, `shed_at`, `needs_watts`). v1.4.0 (the budget can follow a power-source sensor:
-  options flow "Budget by Power Source", `state = watts` per line; lower
+  restores carry `shed_reason`, `shed_at`, `needs_watts`). v1.4.0 (the budget can follow a power-source sensor; lower
   applies at once, higher after a delay, default 60 s). v1.3.4: restores go most important first and keep a
   2% margin; a budget rise releases what its drop shed without a cooldown;
   a budget change is acted on at once). v1.3.3: balancing pauses while the main meter has been

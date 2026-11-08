@@ -1,5 +1,5 @@
 """
-What the options flow saves must be what was typed into it.
+What the appliance form saves must be what was typed into it.
 
 The flow rebuilds an appliance's configuration from the fields it knows
 about rather than storing the form wholesale, so a field added to the form
@@ -21,24 +21,28 @@ from tests.conftest import (
     UPSTAIRS_POWER,
 )
 
-EDIT_UPSTAIRS = "edit_sensor_0"
+
+def _subentry_of(entry, appliance: str):
+    return next(
+        sub for sub in entry.subentries.values() if sub.data["appliance"] == appliance
+    )
 
 
 async def _open_options(hass, entry):
-    """Open the options flow and step into editing the first appliance."""
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "sensor_menu"
-    return await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": EDIT_UPSTAIRS}
+    """Open the edit form of the upstairs tank's subentry."""
+    subentry = _subentry_of(entry, UPSTAIRS)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "appliance"),
+        context={"source": "reconfigure", "subentry_id": subentry.subentry_id},
     )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    return result
 
 
 async def _finish(hass, flow_id):
-    """Return to the menu and save."""
-    return await hass.config_entries.options.async_configure(
-        flow_id, {"action": "finish"}
-    )
+    """Let the reload that the submit started settle."""
+    await hass.async_block_till_done()
 
 
 def _offered_defaults(schema) -> dict:
@@ -55,11 +59,7 @@ def _offered_defaults(schema) -> dict:
 
 
 def _appliance(entry, entity_id: str) -> dict:
-    for rung in entry.data["power_sensors"]:
-        if rung["appliance"] == entity_id:
-            return rung
-    message = f"{entity_id} missing from the saved ladder"
-    raise AssertionError(message)
+    return dict(_subentry_of(entry, entity_id).data)
 
 
 async def test_nameplate_survives_the_options_flow(hass, world, setup_balancer):
@@ -67,9 +67,8 @@ async def test_nameplate_survives_the_options_flow(hass, world, setup_balancer):
     entry = await setup_balancer()
 
     result = await _open_options(hass, entry)
-    assert result["step_id"] == "edit_sensor"
 
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
             "entity_id": UPSTAIRS_POWER,
@@ -99,7 +98,7 @@ async def test_a_saved_nameplate_is_shown_when_editing_again(
     """
     entry = await setup_balancer()
     result = await _open_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
             "entity_id": UPSTAIRS_POWER,
@@ -123,7 +122,7 @@ async def test_editing_another_field_keeps_the_nameplate(hass, world, setup_bala
     entry = await setup_balancer()
 
     result = await _open_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
             "entity_id": UPSTAIRS_POWER,
@@ -141,7 +140,7 @@ async def test_editing_another_field_keeps_the_nameplate(hass, world, setup_bala
     result = await _open_options(hass, entry)
     submission = _offered_defaults(result["data_schema"].schema)
     submission["importance"] = 3
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], submission
     )
     await _finish(hass, result["flow_id"])
@@ -156,7 +155,7 @@ async def test_zero_is_stored_as_unset(hass, world, setup_balancer):
     """Zero means unknown, so it need not be written out as a value."""
     entry = await setup_balancer()
     result = await _open_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
             "entity_id": UPSTAIRS_POWER,
@@ -199,7 +198,7 @@ async def test_every_offered_field_is_stored(hass, world, setup_balancer, field)
         "device_cooldown": 240,
         "nominal_power_watt": 1800,
     }
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], values
     )
     await _finish(hass, result["flow_id"])
@@ -215,7 +214,7 @@ async def test_the_other_appliances_are_untouched(hass, world, setup_balancer):
     """Editing one rung must not disturb the rest of the ladder."""
     entry = await setup_balancer()
     result = await _open_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
             "entity_id": UPSTAIRS_POWER,
@@ -232,4 +231,4 @@ async def test_the_other_appliances_are_untouched(hass, world, setup_balancer):
     downstairs = _appliance(entry, DOWNSTAIRS)
     assert downstairs["entity_id"] == DOWNSTAIRS_POWER
     assert downstairs["importance"] == 2
-    assert len(entry.data["power_sensors"]) == 2
+    assert len(entry.subentries) == 2

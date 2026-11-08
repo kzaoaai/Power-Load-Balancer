@@ -1,4 +1,187 @@
 {
+  "config": {
+    "step": {
+      "edit_main_sensor": {
+        "data": {
+          "main_power_sensor": "Main Power Sensor",
+          "budget_mode": "Power budget",
+          "power_budget_watt": "Power budget (W or VA, same unit as the main power sensor)",
+          "budget_source_entity": "Budget source",
+          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)",
+          "cooldown_seconds": "Cooldown Time (seconds)",
+          "sustained_shedding_enabled": "Enable sustained-load shedding",
+          "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
+          "sustained_duration_seconds": "Sustained-load duration before shedding (seconds)"
+        },
+        "description": "Choose the main power meter and the budget. Add appliances afterwards from the integration page.",
+        "title": "Power Load Balancer setup",
+        "data_description": {
+          "budget_mode": "Fixed keeps one budget. Variable follows another entity, such as a sensor naming the supply carrying the house, with a budget for each of its states; you set those on the next page.",
+          "power_budget_watt": "With a variable budget, this is the budget at startup and while the source reports a state without a budget of its own.",
+          "budget_source_entity": "Only used by a variable budget: a sensor, select or input select whose state picks the budget.",
+          "budget_raise_delay_seconds": "Only used by a variable budget. A lower budget applies at once; a higher one waits this long, so a supply that comes back for a moment does not get appliances restored onto it."
+        }
+      },
+      "budget_states": {
+        "title": "Budget for each state",
+        "description": "Enter the budget that applies while {source} reports each state. Leave a state blank to keep the current budget while it is reported. Your fixed budget, {budget}, is the starting point.",
+        "data": {
+          "add_states": "Add states not listed"
+        },
+        "data_description": {
+          "add_states": "Type a state exactly as the entity reports it, capitals included, and press Submit to get a field for it."
+        }
+      }
+    },
+    "error": {
+      "notify_service_required": "Choose at least one device to notify, or set those events to “Notification in Home Assistant” instead.",
+      "valid_budget_required": "Please enter a valid power budget (a positive integer).",
+      "budget_map_required": "Enter a budget for at least one state.",
+      "source_entity_required": "Choose the entity the budget follows, or switch the budget to fixed."
+    }
+  },
+  "config_subentries": {
+    "appliance": {
+      "entry_type": "Appliance",
+      "initiate_flow": {
+        "user": "Add appliance"
+      },
+      "step": {
+        "user": {
+          "title": "Add appliance",
+          "description": "Choose the appliance the balancer may switch off, and the sensor that measures what it draws.",
+          "data": {
+            "entity_id": "Monitored Power Sensor",
+            "name": "Custom Name (Optional)",
+            "importance": "Importance (1=Low, 10=High)",
+            "last_resort": "Last Resort (Turn off only if absolutely necessary)",
+            "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
+            "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
+            "power_draw_mode": "Power draw",
+            "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
+          },
+          "data_description": {
+            "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit appliance",
+          "description": "Change how the balancer treats this appliance. Whether it is balanced at all is its Load balancing switch.",
+          "data": {
+            "entity_id": "Monitored Power Sensor",
+            "name": "Custom Name (Optional)",
+            "importance": "Importance (1=Low, 10=High)",
+            "last_resort": "Last Resort (Turn off only if absolutely necessary)",
+            "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
+            "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
+            "power_draw_mode": "Power draw",
+            "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
+          },
+          "data_description": {
+            "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
+          }
+        }
+      },
+      "error": {
+        "select_appliance_required": "Please select the controllable appliance for this sensor.",
+        "select_sensor_required": "Please select a monitored power sensor.",
+        "fixed_power_required": "Enter the power draw in watts, or choose to learn it.",
+        "appliance_already_configured": "This appliance is already balanced by another entry."
+      },
+      "abort": {
+        "reconfigure_successful": "Appliance updated."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Power Load Balancer",
+        "description": "Appliances are listed on the integration page: add one with **Add appliance**, edit or delete each from its own row, and switch its balancing on or off from its **Load balancing** switch.",
+        "menu_options": {
+          "edit_main_sensor": "Main settings",
+          "edit_notifications": "Notifications",
+          "finish": "Save"
+        }
+      },
+      "edit_main_sensor": {
+        "data": {
+          "main_power_sensor": "Main Power Sensor",
+          "budget_mode": "Power budget",
+          "power_budget_watt": "Power budget (W or VA, same unit as the main power sensor)",
+          "budget_source_entity": "Budget source",
+          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)",
+          "cooldown_seconds": "Cooldown Time (seconds)",
+          "sustained_shedding_enabled": "Enable sustained-load shedding",
+          "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
+          "sustained_duration_seconds": "Sustained-load duration before shedding (seconds)"
+        },
+        "description": "Edit the main power sensor, power budget, and cooldown settings.",
+        "title": "Edit Main Sensor Settings",
+        "data_description": {
+          "budget_mode": "Fixed keeps one budget. Variable follows another entity, such as a sensor naming the supply carrying the house, with a budget for each of its states; you set those on the next page.",
+          "power_budget_watt": "With a variable budget, this is the budget at startup and while the source reports a state without a budget of its own.",
+          "budget_source_entity": "Only used by a variable budget: a sensor, select or input select whose state picks the budget.",
+          "budget_raise_delay_seconds": "Only used by a variable budget. A lower budget applies at once; a higher one waits this long, so a supply that comes back for a moment does not get appliances restored onto it."
+        }
+      },
+      "edit_notifications": {
+        "title": "Notification Settings",
+        "description": "Everything the balancer does is always written to its event log and put on the event bus. Choose here which of them are also worth interrupting you for, and how.",
+        "data": {
+          "notify_services": "Devices to notify",
+          "notify_channel_shed": "An appliance was switched off",
+          "notify_channel_restore": "An appliance was switched back on",
+          "notify_channel_budget": "The power budget changed",
+          "notify_channel_problem": "Something needs attention"
+        }
+      },
+      "budget_states": {
+        "title": "Budget for each state",
+        "description": "Enter the budget that applies while {source} reports each state. Leave a state blank to keep the current budget while it is reported. Your fixed budget, {budget}, is the starting point.",
+        "data": {
+          "add_states": "Add states not listed"
+        },
+        "data_description": {
+          "add_states": "Type a state exactly as the entity reports it, capitals included, and press Submit to get a field for it."
+        }
+      }
+    },
+    "error": {
+      "notify_service_required": "Choose at least one device to notify, or set those events to “Notification in Home Assistant” instead.",
+      "valid_budget_required": "Please enter a valid power budget (a positive integer).",
+      "budget_map_required": "Enter a budget for at least one state.",
+      "source_entity_required": "Choose the entity the budget follows, or switch the budget to fixed."
+    }
+  },
+  "entity": {
+    "switch": {
+      "enabled": {
+        "name": "Enabled"
+      },
+      "appliance_balancing": {
+        "name": "Load balancing"
+      }
+    },
+    "number": {
+      "power_budget": {
+        "name": "Power Budget"
+      }
+    },
+    "sensor": {
+      "pending_actions": {
+        "name": "Pending Actions"
+      },
+      "learned_draw": {
+        "name": "Learned power draw"
+      }
+    },
+    "binary_sensor": {
+      "shed_by_balancer": {
+        "name": "Shed by load balancer"
+      }
+    }
+  },
   "issues": {
     "device_unavailable": {
       "title": "Entity unavailable for balancing",
@@ -13,20 +196,25 @@
       "description": "Power Load Balancer is configured to use {entity_id}, but no such entity exists in this Home Assistant. Nothing is broken in the house -- the configuration names something that is not here, so balancing simply ignores it. Open the integration's options and either point this row at an entity that exists, or remove the row. This will not clear on its own."
     }
   },
-  "entity": {
-    "switch": {
-      "enabled": {
-        "name": "Enabled"
+  "selector": {
+    "notify_channel": {
+      "options": {
+        "none": "Don't notify me",
+        "persistent": "Notification in Home Assistant",
+        "service": "Push to my device",
+        "both": "Both"
       }
     },
-    "number": {
-      "power_budget": {
-        "name": "Power Budget"
+    "power_draw_mode": {
+      "options": {
+        "learn": "Learn it from the power sensor",
+        "fixed": "Use a fixed value"
       }
     },
-    "sensor": {
-      "pending_actions": {
-        "name": "Pending Actions"
+    "budget_mode": {
+      "options": {
+        "fixed": "Fixed",
+        "source": "Variable: follows another entity"
       }
     }
   },
@@ -57,212 +245,6 @@
           "name": "Reason",
           "description": "Reason why the appliance is being turned on (optional)"
         }
-      }
-    }
-  },
-  "config": {
-    "step": {
-      "user": {
-        "data": {
-          "action": "Action"
-        },
-        "description": "Welcome to the Power Load Balancer setup. Configure your main power sensor and add monitored power sensors with their corresponding appliances.",
-        "title": "Power Load Balancer Setup"
-      },
-      "edit_main_sensor": {
-        "data": {
-          "main_power_sensor": "Main Power Sensor",
-          "power_budget_watt": "Power Budget (W or VA, same unit as the main power sensor)",
-          "cooldown_seconds": "Cooldown Time (seconds)",
-          "sustained_shedding_enabled": "Enable sustained-load shedding",
-          "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
-          "sustained_duration_seconds": "Sustained-load duration before shedding (seconds)"
-        },
-        "description": "Configure the main power sensor, power budget, and the default cooldown time before appliances can turn back on after being turned off.",
-        "title": "Edit Main Sensor Settings"
-      },
-      "add_sensor": {
-        "data": {
-          "entity_id": "Monitored Power Sensor",
-          "name": "Custom Name (Optional)",
-          "importance": "Importance (1=Low, 10=High)",
-          "last_resort": "Last Resort (Turn off only if absolutely necessary)",
-          "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
-          "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
-          "power_draw_mode": "Power draw",
-          "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
-        },
-        "description": "Add a new power sensor to monitor and its corresponding controllable appliance.",
-        "title": "Add Monitored Sensor",
-        "data_description": {
-          "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
-        }
-      },
-      "edit_sensor": {
-        "data": {
-          "entity_id": "Monitored Power Sensor",
-          "name": "Custom Name (Optional)",
-          "importance": "Importance (1=Low, 10=High)",
-          "last_resort": "Last Resort (Turn off only if absolutely necessary)",
-          "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
-          "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
-          "remove_sensor": "Remove Sensor",
-          "power_draw_mode": "Power draw",
-          "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
-        },
-        "description": "Edit the settings for this monitored power sensor and its appliance.",
-        "title": "Edit Monitored Sensor",
-        "data_description": {
-          "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
-        }
-      },
-      "edit_notifications": {
-        "title": "Notification Settings",
-        "description": "Everything the balancer does is always written to its event log and put on the event bus. Choose here which of them are also worth interrupting you for, and how.",
-        "data": {
-          "notify_services": "Devices to notify",
-          "notify_channel_shed": "An appliance was switched off",
-          "notify_channel_restore": "An appliance was switched back on",
-          "notify_channel_budget": "The power budget changed",
-          "notify_channel_problem": "Something needs attention"
-        }
-      },
-      "edit_budget_source": {
-        "title": "Budget by Power Source",
-        "description": "Let the budget follow a sensor that names the supply carrying the house. One line per supply, as `state = watts`, with the state written exactly as the sensor reports it (for example `Generator = 4400`). A lower budget applies at once; a higher one after the delay. Leave the sensor empty to set the budget by hand or from an automation.",
-        "data": {
-          "budget_source_entity": "Power source sensor",
-          "budget_source_map": "Budget per source (state = watts, one per line)",
-          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)"
-        }
-      }
-    },
-    "error": {
-      "invalid_edit_action": "Invalid action selected for editing.",
-      "main_sensor_required": "Please configure the main power sensor before finishing.",
-      "notify_service_required": "Choose at least one device to notify, or set those events to “Notification in Home Assistant” instead.",
-      "select_appliance_required": "Please select the controllable appliance for this sensor.",
-      "select_sensor_required": "Please select a monitored power sensor.",
-      "valid_budget_required": "Please enter a valid power budget (a positive integer).",
-      "invalid_budget_map": "Each line must read `state = watts`, with a whole number of watts above zero.",
-      "budget_map_required": "Add at least one `state = watts` line for the chosen sensor.",
-      "fixed_power_required": "Enter the power draw in watts, or choose to learn it."
-    },
-    "abort": {
-      "invalid_sensor_index": "Invalid sensor selected for editing."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "data": {
-          "main_power_sensor": "Main Power Sensor",
-          "power_budget_watt": "Power Budget (W or VA, same unit as the main power sensor)"
-        },
-        "description": "Edit the main power sensor, power budget, and cooldown settings.",
-        "title": "Edit Main Settings"
-      },
-      "sensor_menu": {
-        "data": {
-          "action": "Action"
-        },
-        "description": "Manage your monitored power sensors and their associated appliances.",
-        "title": "Manage Monitored Sensors"
-      },
-      "add_sensor": {
-        "data": {
-          "entity_id": "Monitored Power Sensor",
-          "name": "Custom Name (Optional)",
-          "importance": "Importance (1=Low, 10=High)",
-          "last_resort": "Last Resort (Turn off only if absolutely necessary)",
-          "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
-          "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
-          "power_draw_mode": "Power draw",
-          "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
-        },
-        "description": "Add a new power sensor to monitor and its corresponding controllable appliance.",
-        "title": "Add Monitored Sensor",
-        "data_description": {
-          "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
-        }
-      },
-      "edit_sensor": {
-        "data": {
-          "entity_id": "Monitored Power Sensor",
-          "name": "Custom Name (Optional)",
-          "importance": "Importance (1=Low, 10=High)",
-          "last_resort": "Last Resort (Turn off only if absolutely necessary)",
-          "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
-          "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
-          "remove_sensor": "Remove Sensor",
-          "power_draw_mode": "Power draw",
-          "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
-        },
-        "description": "Edit the settings for this monitored power sensor and its appliance.",
-        "title": "Edit Monitored Sensor",
-        "data_description": {
-          "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
-        }
-      },
-      "edit_main_sensor": {
-        "data": {
-          "main_power_sensor": "Main Power Sensor",
-          "power_budget_watt": "Power Budget (W or VA, same unit as the main power sensor)",
-          "cooldown_seconds": "Cooldown Time (seconds)",
-          "sustained_shedding_enabled": "Enable sustained-load shedding",
-          "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
-          "sustained_duration_seconds": "Sustained-load duration before shedding (seconds)"
-        },
-        "description": "Edit the main power sensor, power budget, and cooldown settings.",
-        "title": "Edit Main Sensor Settings"
-      },
-      "edit_notifications": {
-        "title": "Notification Settings",
-        "description": "Everything the balancer does is always written to its event log and put on the event bus. Choose here which of them are also worth interrupting you for, and how.",
-        "data": {
-          "notify_services": "Devices to notify",
-          "notify_channel_shed": "An appliance was switched off",
-          "notify_channel_restore": "An appliance was switched back on",
-          "notify_channel_budget": "The power budget changed",
-          "notify_channel_problem": "Something needs attention"
-        }
-      },
-      "edit_budget_source": {
-        "title": "Budget by Power Source",
-        "description": "Let the budget follow a sensor that names the supply carrying the house. One line per supply, as `state = watts`, with the state written exactly as the sensor reports it (for example `Generator = 4400`). A lower budget applies at once; a higher one after the delay. Leave the sensor empty to set the budget by hand or from an automation.",
-        "data": {
-          "budget_source_entity": "Power source sensor",
-          "budget_source_map": "Budget per source (state = watts, one per line)",
-          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)"
-        }
-      }
-    },
-    "error": {
-      "notify_service_required": "Choose at least one device to notify, or set those events to “Notification in Home Assistant” instead.",
-      "select_appliance_required": "Please select the controllable appliance for this sensor.",
-      "select_sensor_required": "Please select a monitored power sensor.",
-      "valid_budget_required": "Please enter a valid power budget (a positive integer).",
-      "invalid_budget_map": "Each line must read `state = watts`, with a whole number of watts above zero.",
-      "budget_map_required": "Add at least one `state = watts` line for the chosen sensor.",
-      "fixed_power_required": "Enter the power draw in watts, or choose to learn it."
-    },
-    "abort": {
-      "invalid_sensor_index": "Invalid sensor selected for editing."
-    }
-  },
-  "selector": {
-    "notify_channel": {
-      "options": {
-        "none": "Don't notify me",
-        "persistent": "Notification in Home Assistant",
-        "service": "Push to my device",
-        "both": "Both"
-      }
-    },
-    "power_draw_mode": {
-      "options": {
-        "learn": "Learn it from the power sensor",
-        "fixed": "Use a fixed value"
       }
     }
   }

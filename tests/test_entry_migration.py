@@ -66,10 +66,15 @@ async def test_an_old_entry_keeps_one_copy_of_its_live_configuration(hass, world
     """The stale copy in data is replaced by the one actually in force."""
     entry = await _setup_old_entry(hass)
 
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     assert entry.options == {}
     assert entry.data["main_power_sensor"] == MAIN_SENSOR
-    assert entry.data["power_sensors"] == ladder()
+    assert "power_sensors" not in entry.data
+    migrated = [
+        {k: v for k, v in sub.data.items() if k != "balancing_enabled"}
+        for sub in entry.subentries.values()
+    ]
+    assert migrated == ladder()
     assert balancer_of(hass, entry)._main_power_sensor_entity_id == MAIN_SENSOR
 
 

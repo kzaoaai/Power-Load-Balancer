@@ -364,7 +364,7 @@ async def test_one_line_per_category_with_its_own_picker(hass, world, setup_bala
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     offered = {str(key) for key in result["data_schema"].schema}
 
@@ -383,11 +383,10 @@ async def test_settings_have_their_own_page(hass, world, setup_balancer):
     entry = await setup_balancer()
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    menu = next(key for key in result["data_schema"].schema if str(key) == "action")
-    assert "edit_notifications" in result["data_schema"].schema[menu].container
+    assert "edit_notifications" in result["menu_options"]
 
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_main_sensor"}
+        result["flow_id"], {"next_step_id": "edit_main_sensor"}
     )
     offered = {str(key) for key in result["data_schema"].schema}
     assert not any(field.startswith("notify") for field in offered), (
@@ -401,7 +400,7 @@ async def test_the_picker_round_trips(hass, world, setup_balancer):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "edit_notifications"
@@ -420,7 +419,7 @@ async def test_the_picker_round_trips(hass, world, setup_balancer):
         },
     )
     await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "finish"}
+        result["flow_id"], {"next_step_id": "finish"}
     )
     await hass.async_block_till_done()
 
@@ -429,7 +428,7 @@ async def test_the_picker_round_trips(hass, world, setup_balancer):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     defaults = {
         str(key).removeprefix("notify_channel_"): key.default()
@@ -450,7 +449,7 @@ async def test_asking_for_a_push_with_no_device_is_refused(hass, world, setup_ba
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -473,7 +472,7 @@ async def test_a_refused_form_keeps_what_was_typed(hass, world, setup_balancer):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -510,7 +509,7 @@ async def test_a_typed_service_name_is_cleaned_before_it_is_trusted(
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -523,7 +522,7 @@ async def test_a_typed_service_name_is_cleaned_before_it_is_trusted(
         },
     )
     await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "finish"}
+        result["flow_id"], {"next_step_id": "finish"}
     )
     await hass.async_block_till_done()
 
@@ -536,7 +535,7 @@ async def test_saving_records_the_new_shape(hass, world, setup_balancer):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -549,7 +548,7 @@ async def test_saving_records_the_new_shape(hass, world, setup_balancer):
         },
     )
     await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "finish"}
+        result["flow_id"], {"next_step_id": "finish"}
     )
     await hass.async_block_till_done()
 
@@ -657,7 +656,7 @@ async def test_several_devices_round_trip(hass, world, setup_balancer):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -670,7 +669,7 @@ async def test_several_devices_round_trip(hass, world, setup_balancer):
         },
     )
     await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "finish"}
+        result["flow_id"], {"next_step_id": "finish"}
     )
     await hass.async_block_till_done()
 
@@ -678,7 +677,7 @@ async def test_several_devices_round_trip(hass, world, setup_balancer):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     default = next(
         key.default()
@@ -700,7 +699,7 @@ async def test_an_offline_device_stays_selected(hass, world, setup_balancer):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"action": "edit_notifications"}
+        result["flow_id"], {"next_step_id": "edit_notifications"}
     )
     field = next(
         key for key in result["data_schema"].schema if str(key) == "notify_services"
