@@ -71,7 +71,8 @@ Production installs the fork through the Home Assistant Marketplace
   services, diagnostics, translations and README.
 - Configuration lives in `entry.data`; the options flow and the budget
   number write there. Do not reintroduce a copy in `options`.
-- The inherited GitHub Actions have never run on the fork: GitHub holds
-  workflows on a fork until they are enabled in its Actions tab.
-  `format.yml` commits ruff formatting straight to `main` on every push,
-  so decide on that before enabling them.
+- CI: `validate.yml` (hassfest, HACS) and `tests.yml` (ruff format
+  check, pytest on Python 3.12). The inherited `format.yml`, which
+  pushed formatting commits to `main`, was removed on 2026-11-08.
+  GitHub holds workflows on a fork until they are enabled in its
+  Actions tab.
