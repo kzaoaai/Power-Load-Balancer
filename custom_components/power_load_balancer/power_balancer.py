@@ -36,6 +36,9 @@ from .balancing_engine import BalancingCallbacks, BalancingEngine
 from .clock import monotonic, wall_time
 from .const import (
     CONF_APPLIANCE,
+    CONF_BUDGET_RAISE_DELAY_SECONDS,
+    CONF_BUDGET_SOURCE_ENTITY,
+    CONF_BUDGET_SOURCE_MAP,
     CONF_COOLDOWN_SECONDS,
     CONF_MAIN_POWER_SENSOR,
     CONF_POWER_BUDGET_WATT,
@@ -43,6 +46,7 @@ from .const import (
     CONF_SUSTAINED_DURATION_SECONDS,
     CONF_SUSTAINED_ENABLED,
     CONF_SUSTAINED_THRESHOLD_PERCENT,
+    DEFAULT_BUDGET_RAISE_DELAY_SECONDS,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
     DEFAULT_SUSTAINED_ENABLED,
@@ -192,6 +196,27 @@ class PowerLoadBalancer:
         self._last_tick_sweep: float | None = None
         self._meter_stale = False
         self._budget_lowered_at: float | None = None
+        self._budget_entity: Any = None
+        self._budget_source_entity: str | None = (
+            config_data.get(CONF_BUDGET_SOURCE_ENTITY) or None
+        )
+        source_map = config_data.get(CONF_BUDGET_SOURCE_MAP) or {}
+        self._budget_source_map: dict[str, int] = (
+            {
+                str(state): int(watts)
+                for state, watts in source_map.items()
+                if isinstance(watts, int | float) and watts > 0
+            }
+            if isinstance(source_map, dict)
+            else {}
+        )
+        self._budget_raise_delay = int(
+            config_data.get(
+                CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
+            )
+        )
+        self._budget_source_unsub: Callable[[], None] | None = None
+        self._budget_raise_unsub: Callable[[], None] | None = None
         self._pending_sensor: Any = None
         self._event_dispatcher = BalancerEventDispatcher(
             hass,
@@ -353,7 +378,72 @@ class PowerLoadBalancer:
 
         self._start_health_tracking()
 
+        if self._budget_source_entity and self._budget_source_map:
+            self._budget_source_unsub = async_track_state_change_event(
+                self.hass,
+                self._budget_source_entity,
+                self._handle_budget_source_change,
+            )
+            # The supply in force now decides the budget from the start; a
+            # restart should not wait for the next change of supply.
+            current = self.hass.states.get(self._budget_source_entity)
+            if current is not None:
+                self._apply_source_budget(current.state, immediate=True)
+
         _LOGGER.debug("PowerLoadBalancer listeners registered.")
+
+    @callback
+    def _handle_budget_source_change(self, event: Any) -> None:
+        """Follow the supply named by the budget source entity."""
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            self._apply_source_budget(new_state.state, immediate=False)
+
+    def _cancel_budget_raise(self) -> None:
+        """Drop a pending budget rise, if any."""
+        if self._budget_raise_unsub is not None:
+            self._budget_raise_unsub()
+            self._budget_raise_unsub = None
+
+    def _apply_source_budget(self, source_state: str, *, immediate: bool) -> None:
+        """
+        Set the budget for a supply, lowering at once and raising after a wait.
+
+        A state the map does not name (unknown, unavailable, a supply nobody
+        configured) leaves the budget as it is rather than guessing.
+        """
+        target = self._budget_source_map.get(source_state)
+        if target is None:
+            _LOGGER.debug(
+                "Budget source reports %s, which has no budget; keeping %s W",
+                source_state,
+                self._power_budget,
+            )
+            return
+
+        if target == self._power_budget:
+            self._cancel_budget_raise()
+            return
+
+        if immediate or target < self._power_budget or self._budget_raise_delay <= 0:
+            self._cancel_budget_raise()
+            self.set_power_budget(target)
+            return
+
+        self._cancel_budget_raise()
+
+        @callback
+        def _raise(_now: Any) -> None:
+            self._budget_raise_unsub = None
+            self.set_power_budget(target)
+
+        self._budget_raise_unsub = async_call_later(
+            self.hass, self._budget_raise_delay, _raise
+        )
+
+    def register_budget_entity(self, entity: Any) -> None:
+        """Register the budget number entity so it shows source-driven changes."""
+        self._budget_entity = entity
 
     def _record_availability_event(self, event: dict[str, Any]) -> None:
         """Record an availability event for diagnostics history."""
@@ -697,6 +787,12 @@ class PowerLoadBalancer:
                 self._appliance_unsub()
                 self._appliance_unsub = None
 
+            if self._budget_source_unsub:
+                self._budget_source_unsub()
+                self._budget_source_unsub = None
+            self._cancel_budget_raise()
+            self._budget_entity = None
+
             self._enabled = False
             self._cancel_sustained_check()
             self._event_dispatcher.async_dismiss_persistent()
@@ -843,6 +939,9 @@ class PowerLoadBalancer:
                     "Budget raised; %s may be restored without waiting out a cooldown",
                     ", ".join(released),
                 )
+
+        if self._budget_entity is not None and self._budget_entity.hass is not None:
+            self._budget_entity.async_write_ha_state()
 
         # Act on the new budget now rather than at the next meter reading.
         if self._main_power_sensor_unsub is not None:

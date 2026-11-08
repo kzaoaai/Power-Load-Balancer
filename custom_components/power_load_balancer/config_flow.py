@@ -38,6 +38,9 @@ from .const import (
     CHANNEL_NONE,
     CHANNEL_SERVICE,
     CONF_APPLIANCE,
+    CONF_BUDGET_RAISE_DELAY_SECONDS,
+    CONF_BUDGET_SOURCE_ENTITY,
+    CONF_BUDGET_SOURCE_MAP,
     CONF_COOLDOWN_SECONDS,
     CONF_DEVICE_COOLDOWN,
     CONF_IMPORTANCE,
@@ -51,6 +54,7 @@ from .const import (
     CONF_SUSTAINED_DURATION_SECONDS,
     CONF_SUSTAINED_ENABLED,
     CONF_SUSTAINED_THRESHOLD_PERCENT,
+    DEFAULT_BUDGET_RAISE_DELAY_SECONDS,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_NOMINAL_POWER_WATT,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
@@ -394,6 +398,95 @@ def _get_friendly_name_for_entity(hass: HomeAssistant, entity_id: str) -> str | 
     return result
 
 
+def _format_budget_map(source_map: Any) -> str:
+    """Render a stored {state: watts} map as one "state = watts" per line."""
+    if not isinstance(source_map, dict):
+        return ""
+    return "\n".join(f"{state} = {watts}" for state, watts in source_map.items())
+
+
+def _parse_budget_map(text: str) -> dict[str, int] | None:
+    """
+    Parse "state = watts" lines into a map; None if any line is invalid.
+
+    Blank lines are skipped. States are taken verbatim, so they must match
+    what the source entity reports, capitals included.
+    """
+    parsed: dict[str, int] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        state, sep, watts = line.rpartition("=")
+        state = state.strip()
+        if not sep or not state:
+            return None
+        try:
+            value = int(watts.strip())
+        except ValueError:
+            return None
+        if value <= 0:
+            return None
+        parsed[state] = value
+    return parsed
+
+
+def _budget_source_schema_fields(prefill: dict[str, Any]) -> dict[Any, Any]:
+    """Return the fields of the budget-by-source form."""
+    return {
+        vol.Optional(
+            CONF_BUDGET_SOURCE_ENTITY,
+            description={"suggested_value": prefill.get(CONF_BUDGET_SOURCE_ENTITY)},
+        ): EntitySelector(EntitySelectorConfig(domain="sensor")),
+        vol.Optional(
+            CONF_BUDGET_SOURCE_MAP,
+            default=_format_budget_map(prefill.get(CONF_BUDGET_SOURCE_MAP)),
+        ): TextSelector(TextSelectorConfig(multiline=True)),
+        vol.Optional(
+            CONF_BUDGET_RAISE_DELAY_SECONDS,
+            default=prefill.get(
+                CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
+            ),
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=0,
+                max=3600,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="s",
+            )
+        ),
+    }
+
+
+def _store_budget_source(
+    config_data: dict[str, Any], user_input: dict[str, Any]
+) -> dict[str, str]:
+    """
+    Validate the budget-by-source form and store it; return any errors.
+
+    Clearing the entity turns the feature off; the map is kept for next time.
+    """
+    source_map = _parse_budget_map(str(user_input.get(CONF_BUDGET_SOURCE_MAP, "")))
+    if source_map is None:
+        return {CONF_BUDGET_SOURCE_MAP: "invalid_budget_map"}
+    entity = user_input.get(CONF_BUDGET_SOURCE_ENTITY)
+    if entity and not source_map:
+        return {CONF_BUDGET_SOURCE_MAP: "budget_map_required"}
+
+    if entity:
+        config_data[CONF_BUDGET_SOURCE_ENTITY] = entity
+    else:
+        config_data.pop(CONF_BUDGET_SOURCE_ENTITY, None)
+    config_data[CONF_BUDGET_SOURCE_MAP] = source_map
+    config_data[CONF_BUDGET_RAISE_DELAY_SECONDS] = int(
+        user_input.get(
+            CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
+        )
+    )
+    return {}
+
+
 def _build_menu_options(
     config_data: dict[str, Any],
     *,
@@ -419,6 +512,7 @@ def _build_menu_options(
     )
     options["edit_main_sensor"] = main_sensor_text
     options["edit_notifications"] = "Notification Settings"
+    options["edit_budget_source"] = "Budget by Power Source"
     options["add_sensor"] = "Add New Monitored Sensor"
 
     configured_sensors: list[dict[str, Any]] = config_data.get(CONF_POWER_SENSORS, [])
@@ -548,7 +642,7 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
     MINOR_VERSION: int = 2
     _config_data: dict[str, Any]
 
-    async def async_step_user(
+    async def async_step_user(  # noqa: PLR0911
         self,
         user_input: dict[str, object] | None = None,
     ) -> ConfigFlowResult:
@@ -576,6 +670,8 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_edit_main_sensor()
             if action == "edit_notifications":
                 return await self.async_step_edit_notifications()
+            if action == "edit_budget_source":
+                return await self.async_step_edit_budget_source()
             if action == "add_sensor":
                 return await self.async_step_add_sensor()
             if action and str(action).startswith("edit_sensor_"):
@@ -685,6 +781,33 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="edit_main_sensor",
             data_schema=vol.Schema(schema_dict),
+            errors=errors,
+        )
+
+    async def async_step_edit_budget_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """
+        Let the budget follow the supply that is carrying the house.
+
+        One "state = watts" per line, matched against what the chosen sensor
+        reports. Leave the sensor empty to set the budget by hand or by an
+        automation instead.
+        """
+        errors: dict[str, str] = {}
+        prefill: dict[str, Any] = self._config_data
+        if user_input is not None:
+            errors = _store_budget_source(self._config_data, user_input)
+            if not errors:
+                return await self.async_step_user()
+            prefill = {
+                **self._config_data,
+                CONF_BUDGET_SOURCE_ENTITY: user_input.get(CONF_BUDGET_SOURCE_ENTITY),
+            }
+
+        return self.async_show_form(
+            step_id="edit_budget_source",
+            data_schema=vol.Schema(_budget_source_schema_fields(prefill)),
             errors=errors,
         )
 
@@ -901,7 +1024,7 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             ),
         )
 
-    async def async_step_sensor_menu(
+    async def async_step_sensor_menu(  # noqa: PLR0911
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """
@@ -924,6 +1047,8 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
                 return await self.async_step_edit_main_sensor()
             if action == "edit_notifications":
                 return await self.async_step_edit_notifications()
+            if action == "edit_budget_source":
+                return await self.async_step_edit_budget_source()
             if action == "add_sensor":
                 return await self.async_step_add_sensor()
             if action == "finish":
@@ -959,6 +1084,33 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="sensor_menu",
             data_schema=vol.Schema({vol.Required("action"): vol.In(options)}),
+        )
+
+    async def async_step_edit_budget_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """
+        Let the budget follow the supply that is carrying the house.
+
+        One "state = watts" per line, matched against what the chosen sensor
+        reports. Leave the sensor empty to set the budget by hand or by an
+        automation instead.
+        """
+        errors: dict[str, str] = {}
+        prefill: dict[str, Any] = self._config_data
+        if user_input is not None:
+            errors = _store_budget_source(self._config_data, user_input)
+            if not errors:
+                return await self.async_step_sensor_menu()
+            prefill = {
+                **self._config_data,
+                CONF_BUDGET_SOURCE_ENTITY: user_input.get(CONF_BUDGET_SOURCE_ENTITY),
+            }
+
+        return self.async_show_form(
+            step_id="edit_budget_source",
+            data_schema=vol.Schema(_budget_source_schema_fields(prefill)),
+            errors=errors,
         )
 
     async def async_step_edit_notifications(

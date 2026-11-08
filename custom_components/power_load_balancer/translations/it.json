@@ -118,6 +118,15 @@
           "notify_channel_budget": "Il budget di potenza è cambiato",
           "notify_channel_problem": "Qualcosa richiede attenzione"
         }
+      },
+      "edit_budget_source": {
+        "title": "Budget per fonte di alimentazione",
+        "description": "Il budget segue un sensore che indica la fonte che alimenta la casa. Una riga per fonte, nel formato `stato = watt`, con lo stato scritto esattamente come lo riporta il sensore (ad esempio `Generator = 4400`). Un budget più basso si applica subito; uno più alto dopo il ritardo. Lascia vuoto il sensore per impostare il budget a mano o da un'automazione.",
+        "data": {
+          "budget_source_entity": "Sensore della fonte di alimentazione",
+          "budget_source_map": "Budget per fonte (stato = watt, uno per riga)",
+          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)"
+        }
       }
     },
     "error": {
@@ -126,7 +135,9 @@
       "notify_service_required": "Scegli almeno un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
       "select_appliance_required": "Seleziona l'elettrodomestico controllabile per questo sensore.",
       "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
-      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
+      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
+      "invalid_budget_map": "Ogni riga deve essere `stato = watt`, con un numero intero di watt maggiore di zero.",
+      "budget_map_required": "Aggiungi almeno una riga `stato = watt` per il sensore scelto."
     },
     "abort": {
       "invalid_sensor_index": "Sensore non valido selezionato per la modifica."
@@ -198,13 +209,24 @@
           "notify_channel_budget": "Il budget di potenza è cambiato",
           "notify_channel_problem": "Qualcosa richiede attenzione"
         }
+      },
+      "edit_budget_source": {
+        "title": "Budget per fonte di alimentazione",
+        "description": "Il budget segue un sensore che indica la fonte che alimenta la casa. Una riga per fonte, nel formato `stato = watt`, con lo stato scritto esattamente come lo riporta il sensore (ad esempio `Generator = 4400`). Un budget più basso si applica subito; uno più alto dopo il ritardo. Lascia vuoto il sensore per impostare il budget a mano o da un'automazione.",
+        "data": {
+          "budget_source_entity": "Sensore della fonte di alimentazione",
+          "budget_source_map": "Budget per fonte (stato = watt, uno per riga)",
+          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)"
+        }
       }
     },
     "error": {
       "notify_service_required": "Scegli almeno un dispositivo da avvisare, oppure imposta quegli eventi su “Notifica in Home Assistant”.",
       "select_appliance_required": "Seleziona l'elettrodomestico controllabile per questo sensore.",
       "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
-      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo)."
+      "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
+      "invalid_budget_map": "Ogni riga deve essere `stato = watt`, con un numero intero di watt maggiore di zero.",
+      "budget_map_required": "Aggiungi almeno una riga `stato = watt` per il sensore scelto."
     },
     "abort": {
       "invalid_sensor_index": "Sensore non valido selezionato per la modifica."

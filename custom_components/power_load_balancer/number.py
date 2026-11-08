@@ -51,6 +51,11 @@ class PowerBudgetNumber(NumberEntity):
         self._config_entry = config_entry
         self._attr_unique_id = f"{self._balancer.entry.entry_id}_power_budget"
 
+    async def async_added_to_hass(self) -> None:
+        """Show budget changes made by the balancer itself, not only by users."""
+        await super().async_added_to_hass()
+        self._balancer.register_budget_entity(self)
+
     @property
     def device_info(self) -> DeviceInfo | None:
         """Return device information for the number entity."""

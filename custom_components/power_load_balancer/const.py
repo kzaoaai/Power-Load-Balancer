@@ -84,6 +84,16 @@ def shed_store_key(entry_id: str) -> str:
 
 CONF_NOTIFY_SERVICES = "notify_services"
 
+# The budget can follow a sensor that names the supply carrying the house
+# (for instance solar, utility, generator), each supply with its own budget.
+# Stored as {state: watts}. A drop applies at once, because the new supply
+# may already be overloaded; a rise waits BUDGET_RAISE_DELAY so a supply that
+# flickers back for a moment does not restore appliances onto it.
+CONF_BUDGET_SOURCE_ENTITY = "budget_source_entity"
+CONF_BUDGET_SOURCE_MAP = "budget_source_map"
+CONF_BUDGET_RAISE_DELAY_SECONDS = "budget_raise_delay_seconds"
+DEFAULT_BUDGET_RAISE_DELAY_SECONDS = 60
+
 # Read-only now: entries saved before delivery became a per-category choice
 # still carry these, and notify_channels.resolve_notify_channels translates
 # them. Nothing writes them any more -- do not offer them in the config flow.

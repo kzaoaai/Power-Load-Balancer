@@ -16,6 +16,7 @@ A Home Assistant custom integration to prevent exceeding your household's power 
 -   **Sustained-load shedding**: sheds one appliance at a time once the load has stayed above a set percentage of the budget for a set time, on apparent power (VA) as well as watts.
 -   **Water heaters**: `water_heater` entities are supported; a `generic_water_heater` tank is shed through that integration's own shed and release services, so the shed is not mistaken for a manual change.
 -   **Restart-safe**: what the balancer has shed, and the mode to give back, is saved and taken back after a restart or reload.
+-   **Budget by power source**: the budget can follow a sensor that names the supply carrying the house (for example solar, utility, generator), with a budget per supply. A lower budget applies at once; a higher one after a configurable delay.
 -   **Pending actions sensor**: shows what the balancer is about to shed or restore, and when.
 -   **Notifications**: a delivery channel per event category (shed, restore, budget, problem).
 -   **Custom Services**: Enhanced `turn_on_appliance` and `turn_off_appliance` services with proper logging attribution.

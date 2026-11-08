@@ -118,6 +118,15 @@
           "notify_channel_budget": "The power budget changed",
           "notify_channel_problem": "Something needs attention"
         }
+      },
+      "edit_budget_source": {
+        "title": "Budget by Power Source",
+        "description": "Let the budget follow a sensor that names the supply carrying the house. One line per supply, as `state = watts`, with the state written exactly as the sensor reports it (for example `Generator = 4400`). A lower budget applies at once; a higher one after the delay. Leave the sensor empty to set the budget by hand or from an automation.",
+        "data": {
+          "budget_source_entity": "Power source sensor",
+          "budget_source_map": "Budget per source (state = watts, one per line)",
+          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)"
+        }
       }
     },
     "error": {
@@ -126,7 +135,9 @@
       "notify_service_required": "Choose at least one device to notify, or set those events to “Notification in Home Assistant” instead.",
       "select_appliance_required": "Please select the controllable appliance for this sensor.",
       "select_sensor_required": "Please select a monitored power sensor.",
-      "valid_budget_required": "Please enter a valid power budget (a positive integer)."
+      "valid_budget_required": "Please enter a valid power budget (a positive integer).",
+      "invalid_budget_map": "Each line must read `state = watts`, with a whole number of watts above zero.",
+      "budget_map_required": "Add at least one `state = watts` line for the chosen sensor."
     },
     "abort": {
       "invalid_sensor_index": "Invalid sensor selected for editing."
@@ -198,13 +209,24 @@
           "notify_channel_budget": "The power budget changed",
           "notify_channel_problem": "Something needs attention"
         }
+      },
+      "edit_budget_source": {
+        "title": "Budget by Power Source",
+        "description": "Let the budget follow a sensor that names the supply carrying the house. One line per supply, as `state = watts`, with the state written exactly as the sensor reports it (for example `Generator = 4400`). A lower budget applies at once; a higher one after the delay. Leave the sensor empty to set the budget by hand or from an automation.",
+        "data": {
+          "budget_source_entity": "Power source sensor",
+          "budget_source_map": "Budget per source (state = watts, one per line)",
+          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)"
+        }
       }
     },
     "error": {
       "notify_service_required": "Choose at least one device to notify, or set those events to “Notification in Home Assistant” instead.",
       "select_appliance_required": "Please select the controllable appliance for this sensor.",
       "select_sensor_required": "Please select a monitored power sensor.",
-      "valid_budget_required": "Please enter a valid power budget (a positive integer)."
+      "valid_budget_required": "Please enter a valid power budget (a positive integer).",
+      "invalid_budget_map": "Each line must read `state = watts`, with a whole number of watts above zero.",
+      "budget_map_required": "Add at least one `state = watts` line for the chosen sensor."
     },
     "abort": {
       "invalid_sensor_index": "Invalid sensor selected for editing."
