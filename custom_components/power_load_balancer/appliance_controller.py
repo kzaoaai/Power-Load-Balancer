@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.const import CONF_ENTITY_ID
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.util import dt as dt_util
 
 from .clock import monotonic
 from .const import (
@@ -30,6 +31,9 @@ from .const import (
     NOTIFY_SHED,
     OWN_RESTORE_GRACE_SECONDS,
     RESTORE_MARGIN_FRACTION,
+    RESTORE_SETTLE_SECONDS,
+    RESTORE_SETTLED_FRACTION,
+    RESTORE_SPACING_SECONDS,
     SHED_AWARE_PLATFORMS,
     SHED_STORE_SAVE_DELAY_SECONDS,
     appliance_control_issue_id,
@@ -48,6 +52,8 @@ from .service import ServiceCallParams, safe_service_call
 from .validation import validate_entity_id, validate_entity_state
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from homeassistant.core import Context, HomeAssistant, State
     from homeassistant.helpers.storage import Store
 
@@ -91,6 +97,9 @@ class ApplianceController:
         self._previous_hvac_modes: dict[str, str] = {}
         self._previous_operation_modes: dict[str, str] = {}
         self._own_restores: dict[str, float] = {}
+        self._settling: dict[str, dict[str, float]] = {}
+        self.power_of: Callable[[str], float] = lambda _entity_id: 0.0
+        self._last_restore_at: float | None = None
         self._store: Store[dict[str, Any]] | None = None
 
     def attach_store(self, store: Store[dict[str, Any]]) -> None:
@@ -106,6 +115,7 @@ class ApplianceController:
                     "hvac_mode": self._previous_hvac_modes.get(entity_id),
                     "operation_mode": self._previous_operation_modes.get(entity_id),
                     "expected_power": self._expected_power_restoration.get(entity_id),
+                    "shed_at": info.get("shed_at"),
                 }
                 for entity_id, info in self._balanced_off_appliances.items()
             }
@@ -142,6 +152,9 @@ class ApplianceController:
             self.mark_appliance_balanced_off(
                 entity_id, f"adopted from saved record: {reason}"
             )
+            shed_at = record.get("shed_at")
+            if isinstance(shed_at, str) and shed_at:
+                self._balanced_off_appliances[entity_id]["shed_at"] = shed_at
         hvac_mode = record.get("hvac_mode")
         if isinstance(hvac_mode, str) and hvac_mode:
             self._previous_hvac_modes[entity_id] = hvac_mode
@@ -220,8 +233,63 @@ class ApplianceController:
         self._balanced_off_appliances[entity_id] = {
             "timestamp": monotonic(),
             "reason": reason or "Turned off by Power Load Balancer",
+            "shed_at": dt_util.utcnow().replace(microsecond=0).isoformat(),
         }
+        self._settling.pop(entity_id, None)
         self._schedule_save()
+
+    def get_shed_info(self, entity_id: str) -> dict[str, Any] | None:
+        """Return why and when an appliance was shed, if it is held off."""
+        return self._balanced_off_appliances.get(entity_id)
+
+    def note_restore_settling(self, entity_id: str, expected_power: float) -> None:
+        """
+        Record a restore that has landed but may not be drawing yet.
+
+        Its expected draw is held back from the headroom until it shows up on
+        its own sensor or the hold runs out, and the next restore waits out
+        the spacing.
+        """
+        now = monotonic()
+        self._last_restore_at = now
+        self._settling[entity_id] = {
+            "watts": max(float(expected_power), 0.0),
+            "since": now,
+        }
+
+    def settling_power(self, power_of: Callable[[str], float]) -> float:
+        """
+        Return the draw still expected from restores not yet seen drawing.
+
+        A hold ends when the appliance's sensor reads at least half of what it
+        was expected to draw (its draw is in the meter now), or after
+        RESTORE_SETTLE_SECONDS, whichever comes first.
+        """
+        now = monotonic()
+        total = 0.0
+        for entity_id, hold in list(self._settling.items()):
+            watts = hold["watts"]
+            expired = now - hold["since"] >= RESTORE_SETTLE_SECONDS
+            drawing = watts > 0 and power_of(entity_id) >= (
+                watts * RESTORE_SETTLED_FRACTION
+            )
+            if expired or drawing:
+                self._settling.pop(entity_id, None)
+                continue
+            total += watts
+        return total
+
+    def restore_spacing_remaining(self) -> float:
+        """Return how long until the next restore may start, in seconds."""
+        if self._last_restore_at is None:
+            return 0.0
+        return max(0.0, RESTORE_SPACING_SECONDS - (monotonic() - self._last_restore_at))
+
+    def last_restored(self) -> str | None:
+        """Return the appliance restored most recently, while it settles."""
+        if not self._settling:
+            return None
+        return max(self._settling, key=lambda e: self._settling[e]["since"])
 
     def expire_cooldowns_since(self, since: float) -> list[str]:
         """
@@ -920,8 +988,19 @@ class ApplianceController:
                         )
                         return
 
+                    if self.restore_spacing_remaining() > 0:
+                        logger.debug(
+                            "Auto turn-on deferred: another restore is settling",
+                            entity_id=entity_to_restore,
+                        )
+                        return
+
                     current_power = get_total_power_callback()
-                    available_budget = get_power_budget_callback() - current_power
+                    available_budget = (
+                        get_power_budget_callback()
+                        - current_power
+                        - self.settling_power(self.power_of)
+                    )
 
                     expected_power_value = self._expected_power_restoration.get(
                         entity_to_restore, 0.0
@@ -960,6 +1039,7 @@ class ApplianceController:
                         self.forget_own_restore(entity_to_restore)
                         raise
 
+                    self.note_restore_settling(entity_to_restore, expected_power_value)
                     self._expected_power_restoration.pop(entity_to_restore, None)
                     logger.debug(
                         "Auto turn-on completed successfully",
@@ -1440,6 +1520,8 @@ class ApplianceController:
         self._previous_hvac_modes.clear()
         self._previous_operation_modes.clear()
         self._own_restores.clear()
+        self._settling.clear()
+        self._last_restore_at = None
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return runtime diagnostics data for troubleshooting."""
@@ -1456,4 +1538,11 @@ class ApplianceController:
             "expected_power_restoration_watt": dict(self._expected_power_restoration),
             "scheduled_auto_turn_on_tasks": scheduled_tasks,
             "stored_previous_hvac_modes": dict(self._previous_hvac_modes),
+            "settling_restores": {
+                entity_id: {
+                    "watts": hold["watts"],
+                    "age_seconds": round(monotonic() - hold["since"]),
+                }
+                for entity_id, hold in self._settling.items()
+            },
         }

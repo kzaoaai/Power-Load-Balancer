@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (127 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (131 tests). It needs `.venv` on Python
   3.12, built from `requirements_test.txt` as `AGENTS.md` describes.
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 25
   findings that predate the fork's current work, 16 of them in
@@ -61,7 +61,10 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: v1.4.0 (the budget can follow a power-source sensor:
+- Latest release: v1.4.1 (restores 30 s apart; a restored appliance's draw is
+  reserved until its sensor shows it, at most 150 s, because generic water
+  heater staggers its own tanks and an idle tank reads zero; pending-actions
+  restores carry `shed_reason`, `shed_at`, `needs_watts`). v1.4.0 (the budget can follow a power-source sensor:
   options flow "Budget by Power Source", `state = watts` per line; lower
   applies at once, higher after a delay, default 60 s). v1.3.4: restores go most important first and keep a
   2% margin; a budget rise releases what its drop shed without a cooldown;

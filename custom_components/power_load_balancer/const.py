@@ -69,6 +69,25 @@ RESTORE_MARGIN_FRACTION = 0.02
 # action and must not be judged by the turn-on veto meant for people.
 OWN_RESTORE_GRACE_SECONDS = 30
 
+# Restores are spaced out. After one, the next waits this long, so two
+# appliances never come back in the same evaluation and the meter has time to
+# show the first one before the second is sized against it.
+RESTORE_SPACING_SECONDS = 30
+
+# What a restored appliance is expected to draw is held back from the
+# headroom until its own power sensor shows it drawing, or until this long has
+# passed. A released water heater can stay idle for a while: generic water
+# heater staggers its tanks (60 s after a sibling switches on) and a tank at
+# temperature does not heat at all, and its meter may report up to a minute
+# late. Without the hold, a second appliance would be sized against headroom
+# the first is about to take; without the bound, an appliance that never
+# draws would block every restore after it.
+RESTORE_SETTLE_SECONDS = 150
+
+# A restored appliance counts as drawing once its sensor reads at least this
+# share of what it was expected to draw.
+RESTORE_SETTLED_FRACTION = 0.5
+
 # What the balancer has shed, and the modes it must give back, survive a
 # restart or a reload of the entry in this store. Without it a climate or a
 # switch shed just before either stayed off: unlike a managed shed, plain

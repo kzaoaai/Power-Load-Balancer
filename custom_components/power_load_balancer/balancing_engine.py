@@ -42,6 +42,8 @@ class BalancingCallbacks:
     is_appliance_balanced_off: Callable[[str], bool]
     is_in_cooldown: Callable[[str], bool]
     is_appliance_shed: Callable[[str], bool]
+    get_settling_power: Callable[[], float]
+    restore_spacing_remaining: Callable[[], float]
 
 
 class BalancingEngine:
@@ -139,6 +141,11 @@ class BalancingEngine:
             "Considering appliances for restoration: %s", appliances_to_restore
         )
 
+        if appliances_to_restore and callbacks.restore_spacing_remaining() > 0:
+            _LOGGER.debug("Restores spaced out: the last one is still settling")
+            return
+        settling_power = callbacks.get_settling_power()
+
         for appliance_entity_id in appliances_to_restore:
             if callbacks.is_in_cooldown(appliance_entity_id):
                 continue
@@ -151,7 +158,7 @@ class BalancingEngine:
             ):
                 continue
 
-            current_power = callbacks.get_total_power()
+            current_power = callbacks.get_total_power() + settling_power
             available_budget = self._effective_budget - current_power
 
             expected_power = callbacks.get_expected_power_restoration(
@@ -204,11 +211,13 @@ class BalancingEngine:
 
                 async def restore_task(
                     appliance_entity_id: str = appliance_entity_id,
+                    expected_power: float = expected_power,
                 ) -> None:
                     try:
                         await restore_appliance_callback(
                             appliance_entity_id,
                             "restored by automatic balancing",
+                            expected_power,
                         )
                     except Exception:
                         _LOGGER.exception(

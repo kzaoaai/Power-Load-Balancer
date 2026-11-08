@@ -63,6 +63,8 @@ from .const import (
     NOTIFY_BUDGET,
     NOTIFY_PROBLEM,
     POWER_TICK_SWEEP_SECONDS,
+    RESTORE_MARGIN_FRACTION,
+    RESTORE_UNKNOWN_SIZE_FRACTION,
     SHED_STORE_VERSION,
     SHED_VERIFY_GRACE_SECONDS,
     SUSTAINED_DISARM_GRACE_SECONDS,
@@ -237,6 +239,7 @@ class PowerLoadBalancer:
             self._global_cooldown_seconds,
             self._event_dispatcher,
         )
+        self._appliance_controller.power_of = self._get_sensor_power_for_appliance
         self._balancing_engine = BalancingEngine(
             hass, self._monitored_sensors, self._power_budget
         )
@@ -1545,21 +1548,7 @@ class PowerLoadBalancer:
                 )
                 continue
 
-            age = self._appliance_controller.get_balanced_off_age(entity_id)
-            cooldown = self._appliance_controller.get_cooldown_for_appliance(entity_id)
-            remaining = cooldown - age if age is not None else cooldown
-            pending.append(
-                {
-                    "action": "restore",
-                    "entity_id": entity_id,
-                    "due_at": self._due_at(remaining) if remaining > 0 else None,
-                    "reason": (
-                        "waiting out the cooldown"
-                        if remaining > 0
-                        else "waiting for enough headroom to restore"
-                    ),
-                }
-            )
+            pending.append(self._describe_pending_restore(entity_id))
 
         due_times = [item["due_at"] for item in pending if item["due_at"]]
         return {
@@ -1567,6 +1556,58 @@ class PowerLoadBalancer:
             "summary": self._describe_pending(pending),
             "next_due_at": min(due_times) if due_times else None,
             "pending": pending,
+        }
+
+    def _describe_pending_restore(self, entity_id: str) -> dict[str, Any]:
+        """
+        Say why an appliance the balancer holds off is still off.
+
+        Every field stays fixed while the reason does: the headroom an
+        appliance needs, not the headroom there is, which moves on every
+        meter reading and would write a recorder row each time.
+        """
+        controller = self._appliance_controller
+        info = controller.get_shed_info(entity_id) or {}
+        age = controller.get_balanced_off_age(entity_id)
+        cooldown = controller.get_cooldown_for_appliance(entity_id)
+        remaining = cooldown - age if age is not None else cooldown
+        expected = controller.get_expected_power_restoration(entity_id)
+        if expected <= 0:
+            expected = self._get_sensor_power_for_appliance(entity_id)
+        needs_watts = (
+            round(expected + self.effective_budget * RESTORE_MARGIN_FRACTION)
+            if expected > 0
+            else None
+        )
+
+        due_at = None
+        if remaining > 0:
+            due_at = self._due_at(remaining)
+            reason = "waiting out the cooldown"
+        elif controller.restore_spacing_remaining() > 0:
+            due_at = self._due_at(controller.restore_spacing_remaining())
+            settling = controller.last_restored()
+            reason = (
+                f"waiting for {settling} to settle after its restore"
+                if settling
+                else "waiting for the last restore to settle"
+            )
+        elif needs_watts is not None:
+            reason = f"waiting for {needs_watts} W of headroom"
+        else:
+            reason = (
+                f"waiting for the load to fall below "
+                f"{round(self.effective_budget * RESTORE_UNKNOWN_SIZE_FRACTION)} W"
+            )
+
+        return {
+            "action": "restore",
+            "entity_id": entity_id,
+            "due_at": due_at,
+            "reason": reason,
+            "shed_reason": info.get("reason"),
+            "shed_at": info.get("shed_at"),
+            "needs_watts": needs_watts,
         }
 
     def _due_at(self, remaining_seconds: float) -> str | None:
@@ -1681,6 +1722,10 @@ class PowerLoadBalancer:
             ),
             is_in_cooldown=self._appliance_controller.is_in_cooldown,
             is_appliance_shed=self._appliance_controller.is_appliance_shed,
+            get_settling_power=self._settling_power,
+            restore_spacing_remaining=(
+                self._appliance_controller.restore_spacing_remaining
+            ),
         )
 
         self._balancing_engine.balance_up(
@@ -1689,13 +1734,22 @@ class PowerLoadBalancer:
             self._restore_appliance,
         )
 
-    async def _restore_appliance(self, entity_id: str, reason: str) -> None:
+    def _settling_power(self) -> float:
+        """Return the draw still expected from restores not yet drawing."""
+        return self._appliance_controller.settling_power(
+            self._get_sensor_power_for_appliance
+        )
+
+    async def _restore_appliance(
+        self, entity_id: str, reason: str, expected_power: float = 0.0
+    ) -> None:
         """
         Restore an appliance and remove it from balanced off tracking.
 
         Args:
             entity_id: Entity ID of the appliance to restore.
             reason: Reason for restoring the appliance.
+            expected_power: What it is expected to draw once back, in watts.
 
         """
         self._appliance_controller.note_own_restore(entity_id)
@@ -1714,6 +1768,7 @@ class PowerLoadBalancer:
             self._appliance_controller.restart_cooldown(entity_id)
             return
         self._appliance_controller.remove_from_balanced_off(entity_id)
+        self._appliance_controller.note_restore_settling(entity_id, expected_power)
 
     @callback
     def _balance_down(self, reason: str | None = None) -> bool:
