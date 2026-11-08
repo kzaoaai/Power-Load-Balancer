@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 from .appliance_controller import ApplianceController
 from .balancing_engine import BalancingCallbacks, BalancingEngine
-from .clock import monotonic
+from .clock import monotonic, wall_time
 from .const import (
     CONF_APPLIANCE,
     CONF_COOLDOWN_SECONDS,
@@ -54,6 +54,7 @@ from .const import (
     ISSUE_TRANSLATION_KEY_DEVICE_NOT_CONTROLLABLE,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
     ISSUE_TRANSLATION_KEY_ENTITY_NOT_REGISTERED,
+    METER_STALE_SECONDS,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
     NOTIFY_BUDGET,
     NOTIFY_PROBLEM,
@@ -189,6 +190,7 @@ class PowerLoadBalancer:
         self._below_arm_since = None
         self._unverified_sheds: set[str] = set()
         self._last_tick_sweep: float | None = None
+        self._meter_stale = False
         self._pending_sensor: Any = None
         self._event_dispatcher = BalancerEventDispatcher(
             hass,
@@ -408,6 +410,10 @@ class PowerLoadBalancer:
                 continue
             health, state_value = classify_entity(self.hass, entity_id)
             self._apply_entity_health(entity_id, entity_type, health, state_value)
+        # A silent meter sends no event, so the periodic sweep is what notices
+        # it went quiet.
+        if self._enabled:
+            self._check_meter_stale()
 
     def _apply_entity_health(
         self,
@@ -958,7 +964,12 @@ class PowerLoadBalancer:
         """
         own_restore = self._appliance_controller.consume_own_restore(entity_id)
         self._appliance_controller.remove_from_balanced_off(entity_id)
-        self._appliance_controller.cancel_scheduled_turn_on(entity_id)
+        if not own_restore:
+            # A person took the appliance back, so a pending automatic
+            # turn-on is moot. When the balancer restored it, that pending
+            # turn-on may be the very task making this change, and cancelling
+            # it mid-call would drop its logbook entry and notification.
+            self._appliance_controller.cancel_scheduled_turn_on(entity_id)
 
         if not self._enabled:
             return
@@ -1005,11 +1016,63 @@ class PowerLoadBalancer:
         """Return the current total house power as measured by the main power sensor."""
         return self._power_monitor.get_total_house_power()
 
+    def _check_meter_stale(self) -> bool:
+        """
+        Return True, and say so once, while the main meter has gone quiet.
+
+        A meter that stops updating but keeps its last number looks healthy
+        to every other check here, and the balancer would keep shedding or
+        restoring against a house it can no longer see. Home Assistant
+        refreshes last_reported on every report, even an unchanged value, so
+        silence longer than METER_STALE_SECONDS means the feed has stopped.
+        An unavailable meter is handled by the paths that already cover it.
+        """
+        state = self.hass.states.get(self._main_power_sensor_entity_id)
+        stale_for: float | None = None
+        if state is not None and state.state not in ("unknown", "unavailable"):
+            age = wall_time() - state.last_reported_timestamp
+            if age > METER_STALE_SECONDS:
+                stale_for = age
+
+        if stale_for is None:
+            if self._meter_stale:
+                self._meter_stale = False
+                _LOGGER.warning(
+                    "Main power sensor %s is reporting again; balancing resumed",
+                    self._main_power_sensor_entity_id,
+                )
+                self._event_dispatcher.add_log_entry(
+                    f"Main power sensor {self._main_power_sensor_entity_id} "
+                    "is reporting again; balancing resumed",
+                    category=NOTIFY_PROBLEM,
+                )
+            return False
+
+        if not self._meter_stale:
+            self._meter_stale = True
+            self._reset_sustained_tracking()
+            _LOGGER.warning(
+                "Main power sensor %s has not reported for %s s; balancing "
+                "paused until it does",
+                self._main_power_sensor_entity_id,
+                round(stale_for),
+            )
+            self._event_dispatcher.add_log_entry(
+                f"Main power sensor {self._main_power_sensor_entity_id} has not "
+                f"reported for {round(stale_for)} s; balancing paused",
+                category=NOTIFY_PROBLEM,
+            )
+            self._refresh_pending_sensor()
+        return True
+
     @callback
-    def async_check_and_balance(self) -> None:
+    def async_check_and_balance(self) -> None:  # noqa: PLR0912
         """Check power usage and perform balancing if necessary."""
         if not self._enabled:
             self._refresh_pending_sensor()
+            return
+
+        if self._check_meter_stale():
             return
 
         self._verify_sheds_took_effect()

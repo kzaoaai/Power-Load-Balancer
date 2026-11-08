@@ -4,16 +4,20 @@ Smaller ways the balancer could leave an appliance or its own records wrong.
 Each test pins one fix from the November 2026 review: an appliance that only
 reappeared being vetoed, a tank shed one way and restored another, a restore
 that did nothing being forgotten, a NaN meter reading, a log message too long
-for a state, and a Repairs notice nothing ever withdrew.
+for a state, a Repairs notice nothing ever withdrew, a meter gone silent, and a
+timer restore that cancelled itself.
 """
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import TYPE_CHECKING
 
 import pytest
 from homeassistant.helpers import issue_registry as ir
 
+from custom_components.power_load_balancer import power_balancer
 from custom_components.power_load_balancer.const import (
     DOMAIN,
     appliance_control_issue_id,
@@ -167,3 +171,61 @@ async def test_an_appliance_control_notice_is_withdrawn_once_usable(
     balancer_of(hass, entry)._evaluate_entity_health()
 
     assert not registry.async_get_issue(DOMAIN, appliance_control_issue_id(UPSTAIRS))
+
+
+async def test_a_silent_meter_pauses_balancing_until_it_reports(  # noqa: PLR0913, PLR0917
+    hass, world, clock, setup_balancer, register_shed_platform, monkeypatch
+):
+    """
+    A meter that stops updating but keeps its number must not be acted on.
+
+    Its last reading looks valid to every other check, so the dwell would
+    elapse against a house nobody can see any more and shed a tank for it.
+    """
+    register_shed_platform(UPSTAIRS, DOWNSTAIRS)
+    entry = await setup_balancer()
+    hass.states.async_set(UPSTAIRS, "electric", {"operation_list": ["electric", "off"]})
+    hass.states.async_set(UPSTAIRS_POWER, str(TANK_VA), {"unit_of_measurement": "W"})
+    await hold(hass, ARM_LEVEL + 60, 20, clock)
+    world.clear()
+
+    # The meter goes quiet for six minutes, still showing an overload.
+    silent_since = time.time()
+    monkeypatch.setattr(power_balancer, "wall_time", lambda: silent_since + 360)
+    await clock.advance(360)
+    balancer = balancer_of(hass, entry)
+    balancer.async_check_and_balance()
+    await hass.async_block_till_done()
+
+    assert world.of(UPSTAIRS) == [], "shed a tank on a reading six minutes old"
+    log = hass.states.get(LOG_SENSOR).attributes["events"]
+    assert any("has not reported" in line for line in log), log
+
+    # It reports again; balancing resumes and says so.
+    monkeypatch.setattr(power_balancer, "wall_time", time.time)
+    await hold(hass, 3000, 20, clock)
+    log = hass.states.get(LOG_SENSOR).attributes["events"]
+    assert any("reporting again" in line for line in log), log
+
+
+async def test_a_timer_restore_does_not_cancel_itself(
+    hass, world, clock, setup_balancer
+):
+    """The state change a timer restore causes must not cancel that timer."""
+    entry = await setup_balancer()
+    balancer = balancer_of(hass, entry)
+    controller = balancer._appliance_controller
+
+    async def _pending() -> None:
+        await asyncio.sleep(3600)
+
+    for own, expect_cancelled in ((True, False), (False, True)):
+        task = hass.async_create_background_task(_pending(), "test timer")
+        controller._scheduled_auto_turn_ons[UPSTAIRS] = task
+        if own:
+            controller.note_own_restore(UPSTAIRS)
+        await balancer._handle_appliance_turn_on(UPSTAIRS)
+        await asyncio.sleep(0)
+        assert task.cancelled() is expect_cancelled, (own, task)
+        task.cancel()
+        controller._scheduled_auto_turn_ons.pop(UPSTAIRS, None)

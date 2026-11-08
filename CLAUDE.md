@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (115 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (117 tests). It needs `.venv` on Python
   3.12, built from `requirements_test.txt` as `AGENTS.md` describes.
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 25
   findings that predate the fork's current work, 16 of them in
@@ -61,7 +61,8 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: v1.3.2. v1.3.1 carried the review fixes of 2026-11-08
+- Latest release: v1.3.3 (balancing pauses while the main meter has been
+  silent for 5 minutes; a timer restore no longer cancels itself). v1.3.1 carried the review fixes of 2026-11-08
   (failed-but-landed sheds kept, own restores and reconnects not vetoed,
   sheds remembered across restarts in a per-entry Store, shed-by-mode
   restored by mode, smaller hardening). v1.3.2 moves the configuration

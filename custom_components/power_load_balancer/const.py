@@ -48,6 +48,10 @@ SUSTAINED_DISARM_GRACE_SECONDS = 15
 SHED_VERIFY_GRACE_SECONDS = 45
 POWER_TICK_SWEEP_SECONDS = 10
 
+# A main meter silent this long has stopped reporting even if it still shows
+# a number; balancing pauses rather than act on a house it cannot see.
+METER_STALE_SECONDS = 300
+
 # An appliance adopted at startup was shed before this process began, so its
 # power sensor reads zero and there is no way to size what restoring it costs.
 # Restoring it only in a demonstrably quiet house bounds that uncertainty

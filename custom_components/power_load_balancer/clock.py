@@ -17,3 +17,13 @@ import time
 def monotonic() -> float:
     """Return a monotonic timestamp in seconds."""
     return time.monotonic()
+
+
+def wall_time() -> float:
+    """
+    Return the wall-clock time in seconds, as Home Assistant stamps states.
+
+    Only for comparing against a state's last_reported_timestamp, which the
+    core takes from time.time(); never for measuring a duration.
+    """
+    return time.time()
