@@ -54,6 +54,8 @@ from .const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
+    DRAW_STORE_SAVE_DELAY_SECONDS,
+    DRAW_STORE_VERSION,
     ENTITY_HEALTH_SWEEP_SECONDS,
     ISSUE_TRANSLATION_KEY_DEVICE_NOT_CONTROLLABLE,
     ISSUE_TRANSLATION_KEY_DEVICE_UNAVAILABLE,
@@ -62,6 +64,7 @@ from .const import (
     NON_BINARY_ACTIVE_STATE_DOMAINS,
     NOTIFY_BUDGET,
     NOTIFY_PROBLEM,
+    POWER_DRAW_LEARN,
     POWER_TICK_SWEEP_SECONDS,
     RESTORE_MARGIN_FRACTION,
     RESTORE_UNKNOWN_SIZE_FRACTION,
@@ -72,6 +75,7 @@ from .const import (
     SUSTAINED_ESCALATION_WINDOW_SECONDS,
     UNAVAILABLE_DEBOUNCE_SECONDS,
     appliance_control_issue_id,
+    draw_store_key,
     shed_store_key,
 )
 from .context_logger import ContextLogger
@@ -135,7 +139,7 @@ class PowerLoadBalancer:
     _enabled: bool
     _skip_reload: bool
 
-    def __init__(
+    def __init__(  # noqa: PLR0915
         self,
         hass: HomeAssistant,
         config_data: dict[str, Any],
@@ -240,6 +244,8 @@ class PowerLoadBalancer:
             self._event_dispatcher,
         )
         self._appliance_controller.power_of = self._get_sensor_power_for_appliance
+        self._draw_store: Store[dict[str, Any]] | None = None
+        self._last_draw_save: float | None = None
         self._balancing_engine = BalancingEngine(
             hass, self._monitored_sensors, self._power_budget
         )
@@ -286,6 +292,22 @@ class PowerLoadBalancer:
             _LOGGER.exception("Could not read the saved shed record; ignoring it")
             saved = {}
         self._appliance_controller.attach_store(store)
+        self._draw_store = Store(
+            self.hass,
+            DRAW_STORE_VERSION,
+            draw_store_key(self._config_data["entry_id"]),
+        )
+        try:
+            self._appliance_controller.learner.load(await self._draw_store.async_load())
+        except Exception:
+            _LOGGER.exception("Could not read the learned draws; starting afresh")
+        self._appliance_controller.learner.forget_except(
+            {
+                str(sensor[CONF_APPLIANCE])
+                for sensor in self._monitored_sensors
+                if sensor.get(CONF_APPLIANCE)
+            }
+        )
         self._adopt_appliances_already_shed()
         appliances = saved.get("appliances") if isinstance(saved, dict) else None
         self._adopt_saved_sheds(appliances if isinstance(appliances, dict) else {})
@@ -801,6 +823,11 @@ class PowerLoadBalancer:
             self._event_dispatcher.async_dismiss_persistent()
             self._power_monitor.clear_tracking()
             await self._appliance_controller.async_flush_store()
+            if self._draw_store is not None:
+                await self._draw_store.async_save(
+                    self._appliance_controller.learner.snapshot()
+                )
+                self._draw_store = None
             self._appliance_controller.cleanup()
             self._clear_unavailable_entity_issues()
             self._clear_non_controllable_entity_issues()
@@ -1032,6 +1059,7 @@ class PowerLoadBalancer:
         await self._power_monitor.handle_power_sensor_state_change(
             event, self.async_check_and_balance
         )
+        self._learn_draw(event)
 
     async def _handle_appliance_state_change(self, event: Any) -> None:
         """Handle state changes for controllable appliances."""
@@ -1102,7 +1130,7 @@ class PowerLoadBalancer:
             if sensor_config.get(CONF_APPLIANCE) == entity_id:
                 power_to_add = self._power_monitor.calculate_sensor_power(
                     sensor_config
-                ) or self._appliance_controller.get_nominal_power(entity_id)
+                ) or self._appliance_controller.get_reference_power(entity_id)
 
                 if (
                     veto
@@ -1793,7 +1821,7 @@ class PowerLoadBalancer:
             reason: Reason for turning off the appliance.
 
         """
-        expected_power = self._get_sensor_power_for_appliance(entity_id)
+        expected_power = self._restore_size(entity_id)
         self._appliance_controller.mark_appliance_balanced_off(entity_id, reason)
         try:
             await self._appliance_controller.turn_off_appliance_service(
@@ -1830,7 +1858,54 @@ class PowerLoadBalancer:
             measured = self._power_monitor.get_sensor_power(sensor_id)
             if measured > 0:
                 return measured
-        return self._appliance_controller.get_nominal_power(appliance_entity_id)
+        return self._appliance_controller.get_reference_power(appliance_entity_id)
+
+    def _restore_size(self, entity_id: str) -> float:
+        """
+        Return what restoring a shed appliance is expected to cost.
+
+        The draw at the moment of the shed, or, for an appliance whose draw is
+        learned, the learned figure when that is higher: a tank shed while on
+        its lower level steps up later in its cycle.
+        """
+        size = self._get_sensor_power_for_appliance(entity_id)
+        if (
+            self._appliance_controller.get_power_draw_mode(entity_id)
+            == POWER_DRAW_LEARN
+        ):
+            size = max(size, self._appliance_controller.learner.learned(entity_id))
+        return size
+
+    def _learn_draw(self, event: Any) -> None:
+        """Feed an appliance's own sensor reading to what is learned of it."""
+        sensor_id = event.data.get("entity_id")
+        appliance = self._appliance_controller.get_appliance_for_sensor(sensor_id)
+        if appliance is None:
+            return
+        watts = self._power_monitor.get_sensor_power(sensor_id)
+        if self._appliance_controller.learner.add(appliance, watts):
+            self._schedule_draw_save()
+
+    def _schedule_draw_save(self) -> None:
+        """
+        Write the learned draws at most every DRAW_STORE_SAVE_DELAY_SECONDS.
+
+        A delayed save restarts its delay on every call, and readings arrive
+        every few seconds, so a plain delayed save would only ever be written
+        at shutdown and a crash would lose everything learned since start.
+        """
+        if self._draw_store is None:
+            return
+        now = monotonic()
+        if (
+            self._last_draw_save is not None
+            and now - self._last_draw_save < DRAW_STORE_SAVE_DELAY_SECONDS
+        ):
+            return
+        self._last_draw_save = now
+        self._draw_store.async_delay_save(
+            self._appliance_controller.learner.snapshot, 1
+        )
 
     def manages_entity(self, entity_id: str) -> bool:
         """Check if this PowerLoadBalancer instance manages the given entity."""

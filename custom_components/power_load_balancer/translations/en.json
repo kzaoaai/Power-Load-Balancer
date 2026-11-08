@@ -89,10 +89,14 @@
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
           "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
-          "nominal_power_watt": "Nameplate power (W, 0 = unknown)"
+          "power_draw_mode": "Power draw",
+          "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
         },
         "description": "Add a new power sensor to monitor and its corresponding controllable appliance.",
-        "title": "Add Monitored Sensor"
+        "title": "Add Monitored Sensor",
+        "data_description": {
+          "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
+        }
       },
       "edit_sensor": {
         "data": {
@@ -103,10 +107,14 @@
           "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
           "remove_sensor": "Remove Sensor",
-          "nominal_power_watt": "Nameplate power (W, 0 = unknown)"
+          "power_draw_mode": "Power draw",
+          "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
         },
         "description": "Edit the settings for this monitored power sensor and its appliance.",
-        "title": "Edit Monitored Sensor"
+        "title": "Edit Monitored Sensor",
+        "data_description": {
+          "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
+        }
       },
       "edit_notifications": {
         "title": "Notification Settings",
@@ -137,7 +145,8 @@
       "select_sensor_required": "Please select a monitored power sensor.",
       "valid_budget_required": "Please enter a valid power budget (a positive integer).",
       "invalid_budget_map": "Each line must read `state = watts`, with a whole number of watts above zero.",
-      "budget_map_required": "Add at least one `state = watts` line for the chosen sensor."
+      "budget_map_required": "Add at least one `state = watts` line for the chosen sensor.",
+      "fixed_power_required": "Enter the power draw in watts, or choose to learn it."
     },
     "abort": {
       "invalid_sensor_index": "Invalid sensor selected for editing."
@@ -168,10 +177,14 @@
           "last_resort": "Last Resort (Turn off only if absolutely necessary)",
           "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
-          "nominal_power_watt": "Nameplate power (W, 0 = unknown)"
+          "power_draw_mode": "Power draw",
+          "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
         },
         "description": "Add a new power sensor to monitor and its corresponding controllable appliance.",
-        "title": "Add Monitored Sensor"
+        "title": "Add Monitored Sensor",
+        "data_description": {
+          "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
+        }
       },
       "edit_sensor": {
         "data": {
@@ -182,10 +195,14 @@
           "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
           "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
           "remove_sensor": "Remove Sensor",
-          "nominal_power_watt": "Nameplate power (W, 0 = unknown)"
+          "power_draw_mode": "Power draw",
+          "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
         },
         "description": "Edit the settings for this monitored power sensor and its appliance.",
-        "title": "Edit Monitored Sensor"
+        "title": "Edit Monitored Sensor",
+        "data_description": {
+          "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
+        }
       },
       "edit_main_sensor": {
         "data": {
@@ -226,7 +243,8 @@
       "select_sensor_required": "Please select a monitored power sensor.",
       "valid_budget_required": "Please enter a valid power budget (a positive integer).",
       "invalid_budget_map": "Each line must read `state = watts`, with a whole number of watts above zero.",
-      "budget_map_required": "Add at least one `state = watts` line for the chosen sensor."
+      "budget_map_required": "Add at least one `state = watts` line for the chosen sensor.",
+      "fixed_power_required": "Enter the power draw in watts, or choose to learn it."
     },
     "abort": {
       "invalid_sensor_index": "Invalid sensor selected for editing."
@@ -239,6 +257,12 @@
         "persistent": "Notification in Home Assistant",
         "service": "Push to my device",
         "both": "Both"
+      }
+    },
+    "power_draw_mode": {
+      "options": {
+        "learn": "Learn it from the power sensor",
+        "fixed": "Use a fixed value"
       }
     }
   }

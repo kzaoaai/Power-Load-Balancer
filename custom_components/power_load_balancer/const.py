@@ -26,8 +26,31 @@ CONF_LAST_RESORT = "last_resort"
 CONF_COOLDOWN_SECONDS = "cooldown_seconds"
 CONF_DEVICE_COOLDOWN = "device_cooldown"
 CONF_NOMINAL_POWER_WATT = "nominal_power_watt"
+CONF_POWER_DRAW_MODE = "power_draw_mode"
 
 DEFAULT_NOMINAL_POWER_WATT = 0
+
+# How an appliance's draw is sized when its sensor cannot say (it is off,
+# shed, or polls too slowly to have caught up): learned from what the sensor
+# has measured while it ran, or a fixed value the user enters. An appliance
+# configured before this choice existed is fixed when it carries a nameplate
+# value and learned when it does not, so nothing changes on upgrade.
+POWER_DRAW_LEARN = "learn"
+POWER_DRAW_FIXED = "fixed"
+POWER_DRAW_MODES = (POWER_DRAW_LEARN, POWER_DRAW_FIXED)
+DEFAULT_POWER_DRAW_MODE = POWER_DRAW_LEARN
+
+# Learning keeps the most recent readings taken while the appliance ran and
+# uses a high percentile, not the median: a water heater can step between two
+# levels within one cycle, and sizing on the lower one would under-reserve for
+# the step. Readings below the floor are standby, not running. Until enough
+# readings exist the draw stays unknown, as it was before learning.
+LEARN_RUNNING_FLOOR_WATT = 50
+LEARN_WINDOW_SAMPLES = 500
+LEARN_MIN_SAMPLES = 20
+LEARN_PERCENTILE = 95
+DRAW_STORE_VERSION = 1
+DRAW_STORE_SAVE_DELAY_SECONDS = 300
 
 SERVICE_TURN_OFF_APPLIANCE = "turn_off_appliance"
 SERVICE_TURN_ON_APPLIANCE = "turn_on_appliance"
@@ -99,6 +122,11 @@ SHED_STORE_SAVE_DELAY_SECONDS = 1
 def shed_store_key(entry_id: str) -> str:
     """Return the storage key of one entry's shed record."""
     return f"power_load_balancer.{entry_id}.shed"
+
+
+def draw_store_key(entry_id: str) -> str:
+    """Return the storage key of one entry's learned appliance draws."""
+    return f"power_load_balancer.{entry_id}.draw"
 
 
 CONF_NOTIFY_SERVICES = "notify_services"

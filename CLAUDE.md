@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (131 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (142 tests). It needs `.venv` on Python
   3.12, built from `requirements_test.txt` as `AGENTS.md` describes.
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 25
   findings that predate the fork's current work, 16 of them in
@@ -61,7 +61,13 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: v1.4.1 (restores 30 s apart; a restored appliance's draw is
+- Latest release: v1.5.0 (per-appliance "Power draw": learn, the default,
+  or fixed. Learning keeps the last 500 running readings (>= 50 W) of the
+  appliance's own sensor in a second Store, `<entry>.draw`, and uses the
+  95th percentile once 20 exist; it sizes the turn-on veto and, for learned
+  appliances, a restore at the larger of the draw at shed time and the
+  learned one. No `power_draw_mode` key means fixed when a nameplate is set,
+  learn otherwise (`resolve_power_draw_mode`), so no migration). v1.4.1 (restores 30 s apart; a restored appliance's draw is
   reserved until its sensor shows it, at most 150 s, because generic water
   heater staggers its own tanks and an idle tank reads zero; pending-actions
   restores carry `shed_reason`, `shed_at`, `needs_watts`). v1.4.0 (the budget can follow a power-source sensor:

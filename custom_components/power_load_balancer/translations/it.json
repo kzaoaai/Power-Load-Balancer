@@ -89,10 +89,14 @@
           "last_resort": "Ultima risorsa (spegni solo se assolutamente necessario)",
           "appliance": "Elettrodomestico controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
           "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
-          "nominal_power_watt": "Potenza di targa (W, 0 = sconosciuta)"
+          "power_draw_mode": "Assorbimento",
+          "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
         },
         "description": "Aggiungi un nuovo sensore di potenza da monitorare e il relativo elettrodomestico controllabile.",
-        "title": "Aggiungi sensore monitorato"
+        "title": "Aggiungi sensore monitorato",
+        "data_description": {
+          "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
+        }
       },
       "edit_sensor": {
         "data": {
@@ -103,10 +107,14 @@
           "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
           "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
           "remove_sensor": "Rimuovi sensore",
-          "nominal_power_watt": "Potenza di targa (W, 0 = sconosciuta)"
+          "power_draw_mode": "Assorbimento",
+          "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
         },
         "description": "Modifica le impostazioni di questo sensore di potenza monitorato e del relativo dispositivo.",
-        "title": "Modifica sensore monitorato"
+        "title": "Modifica sensore monitorato",
+        "data_description": {
+          "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
+        }
       },
       "edit_notifications": {
         "title": "Impostazioni notifiche",
@@ -137,7 +145,8 @@
       "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
       "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
       "invalid_budget_map": "Ogni riga deve essere `stato = watt`, con un numero intero di watt maggiore di zero.",
-      "budget_map_required": "Aggiungi almeno una riga `stato = watt` per il sensore scelto."
+      "budget_map_required": "Aggiungi almeno una riga `stato = watt` per il sensore scelto.",
+      "fixed_power_required": "Inserisci l'assorbimento in watt, oppure scegli di apprenderlo."
     },
     "abort": {
       "invalid_sensor_index": "Sensore non valido selezionato per la modifica."
@@ -168,10 +177,14 @@
           "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
           "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
           "device_cooldown": "Override tempo di attesa dispositivo (secondi, lascia -1 per predefinito)",
-          "nominal_power_watt": "Potenza di targa (W, 0 = sconosciuta)"
+          "power_draw_mode": "Assorbimento",
+          "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
         },
         "description": "Aggiungi un nuovo sensore di potenza da monitorare e il relativo dispositivo controllabile.",
-        "title": "Aggiungi sensore monitorato"
+        "title": "Aggiungi sensore monitorato",
+        "data_description": {
+          "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
+        }
       },
       "edit_sensor": {
         "data": {
@@ -182,10 +195,14 @@
           "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
           "device_cooldown": "Override tempo di attesa dispositivo (secondi, lascia -1 per predefinito)",
           "remove_sensor": "Rimuovi sensore",
-          "nominal_power_watt": "Potenza di targa (W, 0 = sconosciuta)"
+          "power_draw_mode": "Assorbimento",
+          "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
         },
         "description": "Modifica le impostazioni di questo sensore di potenza monitorato e del relativo dispositivo controllabile.",
-        "title": "Modifica sensore monitorato"
+        "title": "Modifica sensore monitorato",
+        "data_description": {
+          "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
+        }
       },
       "edit_main_sensor": {
         "data": {
@@ -226,7 +243,8 @@
       "select_sensor_required": "Seleziona un sensore di potenza monitorato.",
       "valid_budget_required": "Inserisci un budget di potenza valido (un numero intero positivo).",
       "invalid_budget_map": "Ogni riga deve essere `stato = watt`, con un numero intero di watt maggiore di zero.",
-      "budget_map_required": "Aggiungi almeno una riga `stato = watt` per il sensore scelto."
+      "budget_map_required": "Aggiungi almeno una riga `stato = watt` per il sensore scelto.",
+      "fixed_power_required": "Inserisci l'assorbimento in watt, oppure scegli di apprenderlo."
     },
     "abort": {
       "invalid_sensor_index": "Sensore non valido selezionato per la modifica."
@@ -239,6 +257,12 @@
         "persistent": "Notifica in Home Assistant",
         "service": "Notifica push sul dispositivo",
         "both": "Entrambe"
+      }
+    },
+    "power_draw_mode": {
+      "options": {
+        "learn": "Apprendilo dal sensore di potenza",
+        "fixed": "Usa un valore fisso"
       }
     }
   }

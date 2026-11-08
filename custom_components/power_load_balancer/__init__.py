@@ -24,9 +24,11 @@ from .const import (
     CONF_NOTIFY_SERVICE,
     CONF_NOTIFY_SERVICES,
     DOMAIN,
+    DRAW_STORE_VERSION,
     SERVICE_TURN_OFF_APPLIANCE,
     SERVICE_TURN_ON_APPLIANCE,
     SHED_STORE_VERSION,
+    draw_store_key,
     shed_store_key,
 )
 from .context_logger import ContextLogger
@@ -202,9 +204,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete the removed entry's saved shed record."""
+    """Delete the removed entry's saved shed record and learned draws."""
     store: Store[dict] = Store(hass, SHED_STORE_VERSION, shed_store_key(entry.entry_id))
     await store.async_remove()
+    draws: Store[dict] = Store(hass, DRAW_STORE_VERSION, draw_store_key(entry.entry_id))
+    await draws.async_remove()
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

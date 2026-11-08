@@ -30,6 +30,8 @@ from .const import (
     NOTIFY_RESTORE,
     NOTIFY_SHED,
     OWN_RESTORE_GRACE_SECONDS,
+    POWER_DRAW_FIXED,
+    POWER_DRAW_LEARN,
     RESTORE_MARGIN_FRACTION,
     RESTORE_SETTLE_SECONDS,
     RESTORE_SETTLED_FRACTION,
@@ -39,6 +41,7 @@ from .const import (
     appliance_control_issue_id,
 )
 from .context_logger import ContextLogger
+from .draw_learning import DrawLearner, resolve_power_draw_mode
 from .exceptions import (
     ApplianceControlError,
     EntityNotFoundError,
@@ -98,6 +101,7 @@ class ApplianceController:
         self._previous_operation_modes: dict[str, str] = {}
         self._own_restores: dict[str, float] = {}
         self._settling: dict[str, dict[str, float]] = {}
+        self.learner = DrawLearner()
         self.power_of: Callable[[str], float] = lambda _entity_id: 0.0
         self._last_restore_at: float | None = None
         self._store: Store[dict[str, Any]] | None = None
@@ -517,6 +521,24 @@ class ApplianceController:
             except (TypeError, ValueError):
                 return 0.0
         return 0.0
+
+    def get_power_draw_mode(self, entity_id: str) -> str:
+        """Return whether an appliance's draw is learned or fixed."""
+        for sensor_config in self._monitored_sensors:
+            if sensor_config.get(CONF_APPLIANCE) == entity_id:
+                return resolve_power_draw_mode(sensor_config)
+        return POWER_DRAW_LEARN
+
+    def get_reference_power(self, entity_id: str) -> float:
+        """
+        Return what an appliance draws when its sensor cannot say, or 0.
+
+        The fixed value in fixed mode, the learned one in learn mode. Zero
+        means unknown, never that the appliance is free.
+        """
+        if self.get_power_draw_mode(entity_id) == POWER_DRAW_FIXED:
+            return self.get_nominal_power(entity_id)
+        return self.learner.learned(entity_id)
 
     def _get_entity_platform(self, entity_id: str) -> str | None:
         """Return the integration platform that provides an entity."""
@@ -1538,6 +1560,7 @@ class ApplianceController:
             "expected_power_restoration_watt": dict(self._expected_power_restoration),
             "scheduled_auto_turn_on_tasks": scheduled_tasks,
             "stored_previous_hvac_modes": dict(self._previous_hvac_modes),
+            "learned_draw": self.learner.diagnostics(),
             "settling_restores": {
                 entity_id: {
                     "watts": hold["watts"],

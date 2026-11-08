@@ -50,6 +50,7 @@ from .const import (
     CONF_NOTIFY_CHANNELS,
     CONF_NOTIFY_SERVICES,
     CONF_POWER_BUDGET_WATT,
+    CONF_POWER_DRAW_MODE,
     CONF_POWER_SENSORS,
     CONF_SUSTAINED_DURATION_SECONDS,
     CONF_SUSTAINED_ENABLED,
@@ -57,14 +58,18 @@ from .const import (
     DEFAULT_BUDGET_RAISE_DELAY_SECONDS,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_NOMINAL_POWER_WATT,
+    DEFAULT_POWER_DRAW_MODE,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
     DEFAULT_SUSTAINED_ENABLED,
     DEFAULT_SUSTAINED_THRESHOLD_PERCENT,
     DOMAIN,
     NOTIFY_CATEGORIES,
     NOTIFY_CHANNELS,
+    POWER_DRAW_FIXED,
+    POWER_DRAW_MODES,
     SUPPORTED_APPLIANCE_DOMAINS,
 )
+from .draw_learning import resolve_power_draw_mode
 from .notify_channels import (
     resolve_notify_channels,
     resolve_notify_services,
@@ -275,6 +280,30 @@ def _get_appliance_selector() -> EntitySelector:
     )
 
 
+def _power_draw_mode_selector() -> SelectSelector:
+    """Return the learn-or-fixed choice for an appliance's draw."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=list(POWER_DRAW_MODES),
+            mode=SelectSelectorMode.LIST,
+            translation_key="power_draw_mode",
+        )
+    )
+
+
+def _nominal_power_selector() -> NumberSelector:
+    """Return the field for a fixed power draw, in watts."""
+    return NumberSelector(
+        NumberSelectorConfig(
+            min=0,
+            max=20000,
+            step=1,
+            mode=NumberSelectorMode.BOX,
+            unit_of_measurement="W",
+        )
+    )
+
+
 def _build_sensor_edit_schema(initial_data: dict[str, Any]) -> vol.Schema:
     """
     Build a schema for editing a sensor configuration.
@@ -334,19 +363,16 @@ def _build_sensor_edit_schema(initial_data: dict[str, Any]) -> vol.Schema:
         )
     )
 
+    schema_dict[
+        vol.Required(
+            CONF_POWER_DRAW_MODE, default=resolve_power_draw_mode(initial_data)
+        )
+    ] = _power_draw_mode_selector()
     nominal_power = initial_data.get(
         CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
     )
     schema_dict[vol.Optional(CONF_NOMINAL_POWER_WATT, default=nominal_power)] = (
-        NumberSelector(
-            NumberSelectorConfig(
-                min=0,
-                max=20000,
-                step=1,
-                mode=NumberSelectorMode.BOX,
-                unit_of_measurement="W",
-            )
-        )
+        _nominal_power_selector()
     )
 
     schema_dict[vol.Optional("remove_sensor")] = bool
@@ -594,6 +620,13 @@ def _process_sensor_input(
     if isinstance(nominal_power, (int, float)) and nominal_power > 0:
         sensor_config[CONF_NOMINAL_POWER_WATT] = int(nominal_power)
 
+    sensor_config[CONF_POWER_DRAW_MODE] = resolve_power_draw_mode(user_input)
+    if (
+        sensor_config[CONF_POWER_DRAW_MODE] == POWER_DRAW_FIXED
+        and CONF_NOMINAL_POWER_WATT not in sensor_config
+    ):
+        return {CONF_NOMINAL_POWER_WATT: "fixed_power_required"}, None
+
     return errors, sensor_config
 
 
@@ -606,17 +639,12 @@ STEP_ADD_SENSOR_SCHEMA: vol.Schema = vol.Schema(
         ),
         vol.Required(CONF_LAST_RESORT, default=False): bool,
         vol.Required(CONF_APPLIANCE): _get_appliance_selector(),
+        vol.Required(
+            CONF_POWER_DRAW_MODE, default=DEFAULT_POWER_DRAW_MODE
+        ): _power_draw_mode_selector(),
         vol.Optional(
             CONF_NOMINAL_POWER_WATT, default=DEFAULT_NOMINAL_POWER_WATT
-        ): NumberSelector(
-            NumberSelectorConfig(
-                min=0,
-                max=20000,
-                step=1,
-                mode=NumberSelectorMode.BOX,
-                unit_of_measurement="W",
-            )
-        ),
+        ): _nominal_power_selector(),
         vol.Optional(CONF_DEVICE_COOLDOWN, default=-1): NumberSelector(
             NumberSelectorConfig(
                 min=-1,
@@ -932,6 +960,7 @@ class PowerLoadBalancerConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_NOMINAL_POWER_WATT: current_sensor_config.get(
                 CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
             ),
+            CONF_POWER_DRAW_MODE: resolve_power_draw_mode(current_sensor_config),
         }
 
         return self.async_show_form(
@@ -1234,6 +1263,7 @@ class PowerLoadBalancerOptionsFlow(OptionsFlow):
             CONF_NOMINAL_POWER_WATT: current_sensor_config.get(
                 CONF_NOMINAL_POWER_WATT, DEFAULT_NOMINAL_POWER_WATT
             ),
+            CONF_POWER_DRAW_MODE: resolve_power_draw_mode(current_sensor_config),
         }
 
         return self.async_show_form(

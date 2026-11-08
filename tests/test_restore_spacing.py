@@ -10,18 +10,26 @@ second tank was sized against power the first was about to take.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
 from tests.conftest import (
     ARM_LEVEL,
     DOWNSTAIRS,
     DOWNSTAIRS_POWER,
+    HEATER,
     TANK_VA,
     UPSTAIRS,
     UPSTAIRS_POWER,
     balancer_of,
     hold,
+    ladder,
 )
 
 PENDING = "sensor.power_load_balancer_pending_actions"
+LOG_SENSOR = "sensor.power_load_balancer_log"
 
 
 async def _both_tanks_shed(hass, world, clock) -> None:
@@ -125,3 +133,45 @@ async def test_the_pending_sensor_says_why_a_tank_is_off(
     waiting = next(item for item in pending if item["entity_id"] == UPSTAIRS)
     assert waiting["reason"] == f"waiting for {DOWNSTAIRS} to settle after its restore"
     assert waiting["due_at"] is not None
+
+
+async def _timer_restore(hass, controller, expected: float) -> None:
+    """Run a cooldown-timer restore for the spare heater to completion."""
+    controller.mark_appliance_balanced_off(HEATER, "test shed")
+    controller.schedule_auto_turn_on(
+        HEATER, expected, lambda: 3000.0, lambda: ARM_LEVEL
+    )
+    await hass.async_block_till_done()
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=121), fire_all=True
+    )
+    await hass.async_block_till_done()
+
+
+async def test_the_cooldown_timer_respects_spacing_and_the_hold(
+    hass, world, clock, setup_balancer
+):
+    """The timer path is a restore like any other: spaced, and sized net of holds."""
+    entry = await setup_balancer(power_sensors=ladder(include_heater=True))
+    controller = balancer_of(hass, entry)._appliance_controller
+
+    def _restored() -> bool:
+        log = hass.states.get(LOG_SENSOR).attributes["events"]
+        return any(f"Turned on {HEATER}" in line for line in log)
+
+    # Another appliance came back a moment ago.
+    controller.note_restore_settling(UPSTAIRS, TANK_VA)
+    await _timer_restore(hass, controller, 1000)
+    assert not _restored(), "the timer ignored the spacing"
+
+    # Spacing over, but the tank's draw is still held: 3240 W free less 2050 W
+    # held leaves too little for 1500 W plus the margin.
+    await clock.advance(31)
+    await _timer_restore(hass, controller, 1500)
+    assert not _restored(), "the timer spent headroom on hold"
+
+    # The hold runs out; the heater comes back and is itself held.
+    await clock.advance(150)
+    await _timer_restore(hass, controller, 1500)
+    assert _restored()
+    assert HEATER in controller.get_diagnostics_snapshot()["settling_restores"]
