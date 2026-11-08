@@ -73,19 +73,20 @@ async def test_the_balancer_does_not_veto_its_own_restore(
     """
     A restore sized on the measured draw must not be undone by the rating.
 
-    The tank measured 1800 W when it was shed but is rated 2050 W. The restore
+    The tank measured 1700 W when it was shed but is rated 2050 W. The restore
     fits on the measured draw; the veto, sizing on the rating, did not, so it
     shed the tank the balancer had just released.
     """
     register_shed_platform(UPSTAIRS, DOWNSTAIRS)
     entry = await setup_balancer(power_sensors=ladder(upstairs_nameplate=TANK_VA))
     hass.states.async_set(UPSTAIRS, "electric", {"operation_list": ["electric", "off"]})
-    hass.states.async_set(UPSTAIRS_POWER, "1800", {"unit_of_measurement": "W"})
+    hass.states.async_set(UPSTAIRS_POWER, "1700", {"unit_of_measurement": "W"})
     await hold(hass, ARM_LEVEL + 60, 75, clock)
     assert world.services_for(UPSTAIRS) == ["shed"]
 
     hass.states.async_set(UPSTAIRS_POWER, "0", {"unit_of_measurement": "W"})
-    # 1900 W of headroom: room for the measured 1800 W, not the rated 2050 W.
+    # 1900 W of headroom: room for the measured 1700 W plus the restore
+    # margin, not for the rated 2050 W.
     await hold(hass, ARM_LEVEL - 1900, 400, clock)
 
     assert world.services_for(UPSTAIRS) == ["shed", "release"], (

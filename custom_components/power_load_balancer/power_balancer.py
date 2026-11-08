@@ -191,6 +191,7 @@ class PowerLoadBalancer:
         self._unverified_sheds: set[str] = set()
         self._last_tick_sweep: float | None = None
         self._meter_stale = False
+        self._budget_lowered_at: float | None = None
         self._pending_sensor: Any = None
         self._event_dispatcher = BalancerEventDispatcher(
             hass,
@@ -825,6 +826,27 @@ class PowerLoadBalancer:
             f"(effective {round(self.effective_budget)} W)",
             category=NOTIFY_BUDGET,
         )
+
+        if budget < old_budget:
+            self._budget_lowered_at = monotonic()
+        elif self._budget_lowered_at is not None:
+            # What the lower budget shed can come back as soon as it fits:
+            # the cooldown guards against chatter on the load, and this was
+            # the source changing, not the load. A brief switch to the
+            # generator otherwise kept a tank off for a whole cooldown.
+            released = self._appliance_controller.expire_cooldowns_since(
+                self._budget_lowered_at
+            )
+            self._budget_lowered_at = None
+            if released:
+                _LOGGER.info(
+                    "Budget raised; %s may be restored without waiting out a cooldown",
+                    ", ".join(released),
+                )
+
+        # Act on the new budget now rather than at the next meter reading.
+        if self._main_power_sensor_unsub is not None:
+            self.async_check_and_balance()
 
     @property
     def skip_reload(self) -> bool:

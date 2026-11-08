@@ -18,6 +18,7 @@ from .const import (
     CONF_IMPORTANCE,
     CONF_LAST_RESORT,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
+    RESTORE_MARGIN_FRACTION,
     RESTORE_UNKNOWN_SIZE_FRACTION,
 )
 
@@ -100,6 +101,16 @@ class BalancingEngine:
         return state == "on"
 
     @callback
+    def _importance_of(self, appliance_entity_id: str) -> float:
+        """Return an appliance's configured importance; higher is kept longer."""
+        for sensor_config in self._monitored_sensors:
+            if sensor_config.get(CONF_APPLIANCE) == appliance_entity_id:
+                try:
+                    return float(sensor_config.get(CONF_IMPORTANCE, 5))
+                except (TypeError, ValueError):
+                    return 5.0
+        return 5.0
+
     def balance_up(
         self,
         callbacks: BalancingCallbacks,
@@ -115,7 +126,14 @@ class BalancingEngine:
             restore_appliance_callback: Callback to restore an appliance.
 
         """
-        appliances_to_restore = list(balanced_off_appliances)
+        # Most important first: the ladder sheds the least important first,
+        # so restoring in shed order brought the least important back first
+        # whenever there was room for only one.
+        appliances_to_restore = sorted(
+            balanced_off_appliances,
+            key=self._importance_of,
+            reverse=True,
+        )
 
         _LOGGER.debug(
             "Considering appliances for restoration: %s", appliances_to_restore
@@ -170,7 +188,8 @@ class BalancingEngine:
                         int(RESTORE_UNKNOWN_SIZE_FRACTION * 100),
                     )
             else:
-                fits = available_budget >= expected_power
+                margin = self._effective_budget * RESTORE_MARGIN_FRACTION
+                fits = available_budget - margin >= expected_power
 
             if fits:
                 _LOGGER.info(

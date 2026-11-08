@@ -29,6 +29,7 @@ from .const import (
     NOTIFY_RESTORE,
     NOTIFY_SHED,
     OWN_RESTORE_GRACE_SECONDS,
+    RESTORE_MARGIN_FRACTION,
     SHED_AWARE_PLATFORMS,
     SHED_STORE_SAVE_DELAY_SECONDS,
     appliance_control_issue_id,
@@ -221,6 +222,21 @@ class ApplianceController:
             "reason": reason or "Turned off by Power Load Balancer",
         }
         self._schedule_save()
+
+    def expire_cooldowns_since(self, since: float) -> list[str]:
+        """
+        End the cooldown of every appliance shed at or after a moment.
+
+        Returns the appliances released from their cooldown.
+        """
+        released = []
+        for entity_id, info in self._balanced_off_appliances.items():
+            if info.get("timestamp", 0) >= since:
+                info["timestamp"] = (
+                    monotonic() - self.get_cooldown_for_appliance(entity_id) - 1
+                )
+                released.append(entity_id)
+        return released
 
     def restart_cooldown(self, entity_id: str) -> None:
         """Hold an appliance off for another cooldown before the next attempt."""
@@ -919,7 +935,8 @@ class ApplianceController:
                         expected_power=expected_power_value,
                     )
 
-                    if available_budget < expected_power_value:
+                    margin = get_power_budget_callback() * RESTORE_MARGIN_FRACTION
+                    if available_budget - margin < expected_power_value:
                         logger.debug(
                             "Cannot auto turn-on: Insufficient power headroom",
                             entity_id=entity_to_restore,

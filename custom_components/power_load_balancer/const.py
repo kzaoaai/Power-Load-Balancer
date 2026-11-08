@@ -58,6 +58,11 @@ METER_STALE_SECONDS = 300
 # without leaving it suppressed forever.
 RESTORE_UNKNOWN_SIZE_FRACTION = 0.5
 
+# Headroom kept back when restoring an appliance of known size, as a share of
+# the effective budget. Restoring onto the exact ceiling would arm the
+# sustained-load dwell at once, and meter noise would finish the job.
+RESTORE_MARGIN_FRACTION = 0.02
+
 # How long after the balancer starts restoring an appliance its move back to
 # drawing still counts as that restore. The state change reaches the turn-on
 # handler like anybody else's; inside this window it is the balancer's own
