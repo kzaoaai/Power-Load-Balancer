@@ -36,8 +36,9 @@ Production installs the fork through the Home Assistant Marketplace
 `main`. A commit without a release never reaches production.
 
 1. Bump `version` in `custom_components/power_load_balancer/manifest.json`.
-2. `gh release create vX.Y.Z --target <full sha> --notes-file <file>`
-   (`--target` needs the full 40-character sha or a branch name).
+2. `gh release create vX.Y.Z --repo kzaoaai/Power-Load-Balancer --target <full sha> --notes-file <file>`
+   (`--target` needs the full 40-character sha or a branch name; without
+   `--repo`, gh picks the `upstream` remote and fails with a 404).
 3. Install it from the integration's update entity in Home Assistant, then
    restart Home Assistant. The code already loaded keeps running until the
    restart, and the Marketplace raises a repair saying so.
