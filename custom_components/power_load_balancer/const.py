@@ -59,6 +59,19 @@ RESTORE_UNKNOWN_SIZE_FRACTION = 0.5
 # action and must not be judged by the turn-on veto meant for people.
 OWN_RESTORE_GRACE_SECONDS = 30
 
+# What the balancer has shed, and the modes it must give back, survive a
+# restart or a reload of the entry in this store. Without it a climate or a
+# switch shed just before either stayed off: unlike a managed shed, plain
+# "off" says nothing about who turned it off.
+SHED_STORE_VERSION = 1
+SHED_STORE_SAVE_DELAY_SECONDS = 1
+
+
+def shed_store_key(entry_id: str) -> str:
+    """Return the storage key of one entry's shed record."""
+    return f"power_load_balancer.{entry_id}.shed"
+
+
 CONF_NOTIFY_SERVICES = "notify_services"
 
 # Read-only now: entries saved before delivery became a per-category choice

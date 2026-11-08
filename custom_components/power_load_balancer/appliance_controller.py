@@ -30,6 +30,7 @@ from .const import (
     NOTIFY_SHED,
     OWN_RESTORE_GRACE_SECONDS,
     SHED_AWARE_PLATFORMS,
+    SHED_STORE_SAVE_DELAY_SECONDS,
 )
 from .context_logger import ContextLogger
 from .exceptions import (
@@ -46,6 +47,7 @@ from .validation import validate_entity_id, validate_entity_state
 
 if TYPE_CHECKING:
     from homeassistant.core import Context, HomeAssistant, State
+    from homeassistant.helpers.storage import Store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,6 +89,67 @@ class ApplianceController:
         self._previous_hvac_modes: dict[str, str] = {}
         self._previous_operation_modes: dict[str, str] = {}
         self._own_restores: dict[str, float] = {}
+        self._store: Store[dict[str, Any]] | None = None
+
+    def attach_store(self, store: Store[dict[str, Any]]) -> None:
+        """Persist the shed bookkeeping to this store from now on."""
+        self._store = store
+
+    def _shed_snapshot(self) -> dict[str, Any]:
+        """Return what must survive a restart for every appliance held off."""
+        return {
+            "appliances": {
+                entity_id: {
+                    "reason": info.get("reason"),
+                    "hvac_mode": self._previous_hvac_modes.get(entity_id),
+                    "operation_mode": self._previous_operation_modes.get(entity_id),
+                    "expected_power": self._expected_power_restoration.get(entity_id),
+                }
+                for entity_id, info in self._balanced_off_appliances.items()
+            }
+        }
+
+    def _schedule_save(self) -> None:
+        """
+        Queue a write of the shed bookkeeping.
+
+        The snapshot is taken now, not when the write happens, so clearing the
+        in-memory state on unload can never be written over the record.
+        """
+        if self._store is None:
+            return
+        snapshot = self._shed_snapshot()
+        self._store.async_delay_save(lambda: snapshot, SHED_STORE_SAVE_DELAY_SECONDS)
+
+    async def async_flush_store(self) -> None:
+        """Write the shed bookkeeping now, ahead of an unload."""
+        if self._store is not None:
+            await self._store.async_save(self._shed_snapshot())
+
+    def adopt_saved_record(
+        self, entity_id: str, record: dict[str, Any], *, mark: bool = True
+    ) -> None:
+        """
+        Take back an appliance recorded as shed before a restart or reload.
+
+        The cooldown starts again from now: how long the appliance was off
+        before is unknown here, and waiting once more is the safe side.
+        """
+        if mark:
+            reason = record.get("reason") or "Turned off by Power Load Balancer"
+            self.mark_appliance_balanced_off(
+                entity_id, f"adopted from saved record: {reason}"
+            )
+        hvac_mode = record.get("hvac_mode")
+        if isinstance(hvac_mode, str) and hvac_mode:
+            self._previous_hvac_modes[entity_id] = hvac_mode
+        operation_mode = record.get("operation_mode")
+        if isinstance(operation_mode, str) and operation_mode:
+            self._previous_operation_modes[entity_id] = operation_mode
+        expected_power = record.get("expected_power")
+        if isinstance(expected_power, int | float) and expected_power > 0:
+            self._expected_power_restoration[entity_id] = float(expected_power)
+        self._schedule_save()
 
     def set_event_log_sensor(self, sensor: Any) -> None:
         """
@@ -156,6 +219,7 @@ class ApplianceController:
             "timestamp": monotonic(),
             "reason": reason or "Turned off by Power Load Balancer",
         }
+        self._schedule_save()
 
     def get_balanced_off_age(self, entity_id: str) -> float | None:
         """Return seconds since an appliance was marked balanced off."""
@@ -172,7 +236,8 @@ class ApplianceController:
             entity_id: Entity ID of the appliance.
 
         """
-        self._balanced_off_appliances.pop(entity_id, None)
+        if self._balanced_off_appliances.pop(entity_id, None) is not None:
+            self._schedule_save()
 
     def get_balanced_off_appliances(self) -> list[str]:
         """
@@ -475,6 +540,7 @@ class ApplianceController:
         current_mode = appliance_state.state
         if current_mode not in ("off", "unknown", "unavailable"):
             self._previous_operation_modes[entity_id] = current_mode
+            self._schedule_save()
             logger.debug(
                 "Saved water_heater operation mode",
                 entity_id=entity_id,
@@ -693,6 +759,7 @@ class ApplianceController:
 
         """
         self._previous_hvac_modes[entity_id] = hvac_mode
+        self._schedule_save()
 
     def clear_previous_hvac_mode(self, entity_id: str) -> None:
         """
@@ -799,6 +866,7 @@ class ApplianceController:
                 self._scheduled_auto_turn_ons.pop(entity_id)
 
             self._expected_power_restoration[entity_id] = expected_power
+            self._schedule_save()
 
             async def auto_turn_on_task(
                 entity_to_restore: str, delay_seconds: int

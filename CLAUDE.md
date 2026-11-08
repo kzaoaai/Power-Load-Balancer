@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (99 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (102 tests). It needs `.venv` on Python
   3.12, built from `requirements_test.txt` as `AGENTS.md` describes.
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 25
   findings that predate the fork's current work, 16 of them in

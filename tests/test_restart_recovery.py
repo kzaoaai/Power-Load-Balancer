@@ -1,17 +1,19 @@
 """
 What the balancer finds when it comes back up.
 
-Which appliances the balancer had shed lives only in memory, but the shed
-itself lives in the appliance. A restart therefore lands the two out of step,
-and the appliance is the one holding a tank cold.
+Which appliances the balancer had shed is kept in memory and in a saved
+record, and a managed shed also lives in the appliance itself. A restart must
+reconcile all three, or an appliance the balancer turned off stays off.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from homeassistant.config_entries import ConfigEntryState
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.power_load_balancer.const import DOMAIN
+from custom_components.power_load_balancer.const import DOMAIN, shed_store_key
 from tests.conftest import (
     ARM_LEVEL,
     DOWNSTAIRS,
@@ -20,7 +22,11 @@ from tests.conftest import (
     UPSTAIRS_POWER,
     balancer_of,
     hold,
+    ladder,
 )
+
+if TYPE_CHECKING:
+    from homeassistant.core import ServiceCall
 
 
 async def _restart(hass, entry: MockConfigEntry) -> None:
@@ -159,3 +165,96 @@ async def test_adopted_appliance_is_not_restored_into_a_busy_house(
     # Now the house really is quiet.
     await hold(hass, 1500, 120, clock)
     assert ("generic_water_heater", "release") in world.of(UPSTAIRS)
+
+
+RADIATOR = "climate.spare_radiator"
+RADIATOR_POWER = "sensor.spare_radiator_power"
+RADIATOR_ATTRIBUTES = {"hvac_modes": ["off", "heat", "auto"], "hvac_mode": "auto"}
+
+
+async def _shed_a_running_radiator(hass, clock, setup_balancer):
+    """
+    Start a balancer with a radiator running, overload the house, shed it.
+
+    Returns the entry and the list of HVAC modes the balancer asked for.
+    """
+    modes: list[str] = []
+
+    async def _set_hvac_mode(call: ServiceCall) -> None:
+        modes.append(call.data["hvac_mode"])
+
+    hass.services.async_register("climate", "set_hvac_mode", _set_hvac_mode)
+    hass.states.async_set(RADIATOR, "auto", RADIATOR_ATTRIBUTES)
+    hass.states.async_set(RADIATOR_POWER, "1500", {"unit_of_measurement": "W"})
+    rung = {
+        "appliance": RADIATOR,
+        "entity_id": RADIATOR_POWER,
+        "name": "Spare Radiator",
+        "importance": 3,
+        "last_resort": False,
+    }
+    entry = await setup_balancer(power_sensors=[*ladder(), rung])
+
+    await hold(hass, ARM_LEVEL + 60, 75, clock)
+    assert modes == ["off"]
+    # The recorder only records; play the radiator's part.
+    hass.states.async_set(RADIATOR, "off", {**RADIATOR_ATTRIBUTES, "hvac_mode": "off"})
+    hass.states.async_set(RADIATOR_POWER, "0", {"unit_of_measurement": "W"})
+    await hass.async_block_till_done()
+    return entry, modes
+
+
+async def test_a_radiator_shed_before_a_restart_comes_back_in_its_own_mode(
+    hass, world, clock, setup_balancer
+):
+    """
+    "off" alone does not say the balancer did it; the saved record does.
+
+    Nothing reported the shed after the restart, so a radiator or a switch
+    the balancer had turned off stayed off for good, and the mode to give
+    back was lost with it.
+    """
+    entry, modes = await _shed_a_running_radiator(hass, clock, setup_balancer)
+
+    await _restart(hass, entry)
+    balancer = balancer_of(hass, entry)
+    assert RADIATOR in balancer._appliance_controller.get_balanced_off_appliances(), (
+        "forgot a radiator it had shed before the restart"
+    )
+
+    await clock.advance(600)
+    await hold(hass, 1500, 120, clock)
+    assert modes == ["off", "auto"], f"restored the wrong mode: {modes}"
+
+
+async def test_a_radiator_someone_turned_back_on_is_not_adopted(
+    hass, world, clock, setup_balancer
+):
+    """A saved record is evidence of the past; a running appliance outranks it."""
+    entry, _ = await _shed_a_running_radiator(hass, clock, setup_balancer)
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    hass.states.async_set(
+        RADIATOR, "heat", {**RADIATOR_ATTRIBUTES, "hvac_mode": "heat"}
+    )
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    balancer = balancer_of(hass, entry)
+    assert RADIATOR not in balancer._appliance_controller.get_balanced_off_appliances()
+
+
+async def test_removing_the_entry_deletes_its_shed_record(
+    hass, hass_storage, world, clock, setup_balancer
+):
+    """A removed balancer must not leave its record behind."""
+    entry, _ = await _shed_a_running_radiator(hass, clock, setup_balancer)
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    key = shed_store_key(entry.entry_id)
+    assert RADIATOR in hass_storage[key]["data"]["appliances"]
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert key not in hass_storage

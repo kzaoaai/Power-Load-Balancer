@@ -22,6 +22,7 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.start import async_at_started
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt
 
 if TYPE_CHECKING:
@@ -56,11 +57,13 @@ from .const import (
     NON_BINARY_ACTIVE_STATE_DOMAINS,
     NOTIFY_BUDGET,
     NOTIFY_PROBLEM,
+    SHED_STORE_VERSION,
     SHED_VERIFY_GRACE_SECONDS,
     SUSTAINED_DISARM_GRACE_SECONDS,
     SUSTAINED_ESCALATION_DWELL_SECONDS,
     SUSTAINED_ESCALATION_WINDOW_SECONDS,
     UNAVAILABLE_DEBOUNCE_SECONDS,
+    shed_store_key,
 )
 from .context_logger import ContextLogger
 from .entity_health import EntityHealth, classify_entity
@@ -238,7 +241,20 @@ class PowerLoadBalancer:
         self._power_monitor.initialize_power_tracking()
 
         self._initialize_controllability_tracking()
+        store: Store[dict[str, Any]] = Store(
+            self.hass,
+            SHED_STORE_VERSION,
+            shed_store_key(self._config_data["entry_id"]),
+        )
+        try:
+            saved = await store.async_load() or {}
+        except Exception:
+            _LOGGER.exception("Could not read the saved shed record; ignoring it")
+            saved = {}
+        self._appliance_controller.attach_store(store)
         self._adopt_appliances_already_shed()
+        appliances = saved.get("appliances") if isinstance(saved, dict) else None
+        self._adopt_saved_sheds(appliances if isinstance(appliances, dict) else {})
 
         _LOGGER.debug("PowerLoadBalancer setup complete.")
 
@@ -265,6 +281,32 @@ class PowerLoadBalancer:
             _LOGGER.info(
                 "Adopted %s: it reports itself shed, so the balancer will "
                 "restore it when there is headroom",
+                entity_id,
+            )
+
+    def _adopt_saved_sheds(self, saved: dict[str, Any]) -> None:
+        """
+        Take back appliances the saved record says the balancer had shed.
+
+        Plain "off" does not say who turned an appliance off, so the record is
+        the only evidence. An appliance that is running again was taken back by
+        someone and is left alone; one that is still off, or not loaded yet,
+        is held off and restored when there is headroom.
+        """
+        configured = {s.get(CONF_APPLIANCE) for s in self._monitored_sensors}
+        for entity_id, record in saved.items():
+            if entity_id not in configured or not isinstance(record, dict):
+                continue
+            controller = self._appliance_controller
+            if controller.is_appliance_balanced_off(entity_id):
+                controller.adopt_saved_record(entity_id, record, mark=False)
+                continue
+            if self._state_is_drawing(entity_id, self.hass.states.get(entity_id)):
+                continue
+            controller.adopt_saved_record(entity_id, record)
+            _LOGGER.info(
+                "Adopted %s from the saved shed record; it will be restored "
+                "when there is headroom",
                 entity_id,
             )
 
@@ -645,6 +687,7 @@ class PowerLoadBalancer:
             self._cancel_sustained_check()
             self._event_dispatcher.async_dismiss_persistent()
             self._power_monitor.clear_tracking()
+            await self._appliance_controller.async_flush_store()
             self._appliance_controller.cleanup()
             self._clear_unavailable_entity_issues()
             self._clear_non_controllable_entity_issues()

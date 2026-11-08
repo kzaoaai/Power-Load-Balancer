@@ -12,6 +12,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.storage import Store
 
 from .const import (
     ATTR_ENTITY_ID,
@@ -19,6 +20,8 @@ from .const import (
     DOMAIN,
     SERVICE_TURN_OFF_APPLIANCE,
     SERVICE_TURN_ON_APPLIANCE,
+    SHED_STORE_VERSION,
+    shed_store_key,
 )
 from .context_logger import ContextLogger
 from .exceptions import ConfigurationError, PowerLoadBalancerError
@@ -154,6 +157,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
     else:
         return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the removed entry's saved shed record."""
+    store: Store[dict] = Store(hass, SHED_STORE_VERSION, shed_store_key(entry.entry_id))
+    await store.async_remove()
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
