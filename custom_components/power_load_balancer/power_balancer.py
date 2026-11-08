@@ -867,7 +867,15 @@ class PowerLoadBalancer:
         self.async_check_and_balance()
 
     async def _handle_appliance_turn_on(self, entity_id: str) -> None:
-        """Handle an appliance being turned on."""
+        """
+        Handle an appliance being turned on.
+
+        The veto below is for people: it sheds an appliance someone switched
+        on into a load it does not fit. The balancer's own restores arrive
+        here too, and they were already sized against the headroom when they
+        were chosen, so they skip it.
+        """
+        own_restore = self._appliance_controller.consume_own_restore(entity_id)
         self._appliance_controller.remove_from_balanced_off(entity_id)
         self._appliance_controller.cancel_scheduled_turn_on(entity_id)
 
@@ -880,11 +888,15 @@ class PowerLoadBalancer:
                     sensor_config
                 ) or self._appliance_controller.get_nominal_power(entity_id)
 
-                if self._power_monitor.would_exceed_budget(power_to_add):
+                if not own_restore and self._power_monitor.would_exceed_budget(
+                    power_to_add
+                ):
                     await self._appliance_controller.turn_off_appliance(
                         entity_id,
                         reason=(
-                            f"Power {power_to_add} W would exceed the "
+                            "turn-on vetoed: load "
+                            f"{round(self.get_total_house_power())} W plus "
+                            f"{round(power_to_add)} W would exceed the "
                             f"effective budget of "
                             f"{round(self.effective_budget)} W"
                         ),
@@ -1419,7 +1431,14 @@ class PowerLoadBalancer:
             reason: Reason for restoring the appliance.
 
         """
-        await self._appliance_controller.turn_on_appliance_service(entity_id, reason)
+        self._appliance_controller.note_own_restore(entity_id)
+        try:
+            await self._appliance_controller.turn_on_appliance_service(
+                entity_id, reason
+            )
+        except BaseException:
+            self._appliance_controller.forget_own_restore(entity_id)
+            raise
         self._appliance_controller.remove_from_balanced_off(entity_id)
 
     @callback
@@ -1452,11 +1471,10 @@ class PowerLoadBalancer:
                 entity_id, reason
             )
         except Exception:
-            appliance_state = self.hass.states.get(entity_id)
-            if appliance_state is not None and appliance_state.state == "off":
+            if self._appliance_controller.has_stopped(entity_id):
                 _LOGGER.warning(
                     "Turn-off service call for %s failed but the appliance "
-                    "is off; keeping balanced-off tracking",
+                    "has stopped; keeping balanced-off tracking",
                     entity_id,
                 )
             else:

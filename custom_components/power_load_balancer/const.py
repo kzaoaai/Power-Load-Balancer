@@ -53,6 +53,12 @@ SHED_VERIFY_GRACE_SECONDS = 45
 # without leaving it suppressed forever.
 RESTORE_UNKNOWN_SIZE_FRACTION = 0.5
 
+# How long after the balancer starts restoring an appliance its move back to
+# drawing still counts as that restore. The state change reaches the turn-on
+# handler like anybody else's; inside this window it is the balancer's own
+# action and must not be judged by the turn-on veto meant for people.
+OWN_RESTORE_GRACE_SECONDS = 30
+
 CONF_NOTIFY_SERVICES = "notify_services"
 
 # Read-only now: entries saved before delivery became a per-category choice

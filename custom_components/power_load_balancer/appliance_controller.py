@@ -28,6 +28,7 @@ from .const import (
     NOTIFY_PROBLEM,
     NOTIFY_RESTORE,
     NOTIFY_SHED,
+    OWN_RESTORE_GRACE_SECONDS,
     SHED_AWARE_PLATFORMS,
 )
 from .context_logger import ContextLogger
@@ -85,6 +86,7 @@ class ApplianceController:
         self._expected_power_restoration: dict[str, float] = {}
         self._previous_hvac_modes: dict[str, str] = {}
         self._previous_operation_modes: dict[str, str] = {}
+        self._own_restores: dict[str, float] = {}
 
     def set_event_log_sensor(self, sensor: Any) -> None:
         """
@@ -290,6 +292,49 @@ class ApplianceController:
             return False
 
         return bool(state.attributes.get(attribute))
+
+    def has_stopped(self, entity_id: str) -> bool:
+        """
+        Return True when an appliance reports that it is no longer running.
+
+        A turn-off whose service call failed or timed out can still have taken
+        effect. A plain appliance shows that by reading "off"; one suppressed
+        through a managed shed keeps reporting its operation mode and flags the
+        shed in an attribute instead, so both have to count. Reading only
+        "off" forgot every shed tank whose shed call errored after it landed,
+        and nothing ever released it.
+        """
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return False
+        return state.state == "off" or self.state_reports_shed(entity_id, state)
+
+    def note_own_restore(self, entity_id: str) -> None:
+        """
+        Record that the balancer itself is about to restore an appliance.
+
+        The appliance's return to drawing reaches the turn-on handler exactly
+        like a person switching it on. Without this record the handler's
+        budget veto judged the balancer's own restore as an override and shed
+        the appliance again within the same second.
+        """
+        self._own_restores[entity_id] = monotonic()
+
+    def forget_own_restore(self, entity_id: str) -> None:
+        """Drop the record of a restore that did not go through."""
+        self._own_restores.pop(entity_id, None)
+
+    def consume_own_restore(self, entity_id: str) -> bool:
+        """
+        Return True, once, when the balancer restored this appliance just now.
+
+        The record is used up by the first turn-on it explains, so a later
+        turn-on by a person is still judged by the veto.
+        """
+        started = self._own_restores.pop(entity_id, None)
+        if started is None:
+            return False
+        return monotonic() - started <= OWN_RESTORE_GRACE_SECONDS
 
     def get_nominal_power(self, entity_id: str) -> float:
         """
@@ -805,11 +850,16 @@ class ApplianceController:
                         "Auto turning on appliance after delay",
                         entity_id=entity_to_restore,
                     )
-                    await self.turn_on_appliance_service(
-                        entity_to_restore,
-                        f"Automatic restoration after {delay_seconds}s "
-                        "power budget timeout",
-                    )
+                    self.note_own_restore(entity_to_restore)
+                    try:
+                        await self.turn_on_appliance_service(
+                            entity_to_restore,
+                            f"Automatic restoration after {delay_seconds}s "
+                            "power budget timeout",
+                        )
+                    except BaseException:
+                        self.forget_own_restore(entity_to_restore)
+                        raise
 
                     self._expected_power_restoration.pop(entity_to_restore, None)
                     logger.debug(
@@ -889,10 +939,9 @@ class ApplianceController:
         already switched off. In that case the balanced-off tracking must be
         kept so the appliance is still restored later.
         """
-        state_after = self.hass.states.get(entity_id)
-        if state_after is not None and state_after.state == "off":
+        if self.has_stopped(entity_id):
             logger.warning(
-                "Turn-off service call failed but the appliance is off; "
+                "Turn-off service call failed but the appliance has stopped; "
                 "keeping balanced-off tracking",
                 entity_id=entity_id,
             )
@@ -1283,6 +1332,7 @@ class ApplianceController:
         self._balanced_off_appliances.clear()
         self._previous_hvac_modes.clear()
         self._previous_operation_modes.clear()
+        self._own_restores.clear()
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return runtime diagnostics data for troubleshooting."""
