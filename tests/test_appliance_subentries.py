@@ -328,3 +328,36 @@ async def test_an_existing_sensor_turns_diagnostic_on_upgrade(
     found = registry.async_get(entity_id).entity_category
     assert found is not None
     assert found.value == "diagnostic"
+
+
+async def test_a_device_rebuilt_at_startup_gets_its_entities_back(
+    hass, world, setup_balancer
+):
+    """
+    The water heater's device is removed and added back while it starts.
+
+    Removal drops every other integration's link to it; the device comes back
+    under its old id, and so must the balancer's entities.
+    """
+    device = _register_on_device(hass, UPSTAIRS, "generic_water_heater", "Upstairs")
+    entry = await setup_balancer()
+    devices, registry = dr.async_get(hass), er.async_get(hass)
+    switch = _entity_of(hass, entry, UPSTAIRS, "switch", "appliance_balancing")
+    assert registry.async_get(switch).device_id == device.id
+
+    devices.async_remove_device(device.id)
+    await hass.async_block_till_done()
+    assert registry.async_get(switch).device_id is None
+    assert registry.async_get(UPSTAIRS) is None, "the heater went with its device"
+
+    rebuilt = _register_on_device(hass, UPSTAIRS, "generic_water_heater", "Upstairs")
+    await hass.async_block_till_done()
+
+    for platform, key in (
+        ("switch", "appliance_balancing"),
+        ("sensor", "learned_draw"),
+        ("binary_sensor", "shed_by_balancer"),
+    ):
+        entity_id = _entity_of(hass, entry, UPSTAIRS, platform, key)
+        assert registry.async_get(entity_id).device_id == rebuilt.id, key
+    assert hass.states.get(switch).name == "Upstairs PLB enable"

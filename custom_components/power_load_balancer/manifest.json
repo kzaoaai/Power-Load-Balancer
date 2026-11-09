@@ -13,5 +13,5 @@
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/kzaoaai/Power-Load-Balancer/issues",
-  "version": "2.1.0"
+  "version": "2.1.1"
 }

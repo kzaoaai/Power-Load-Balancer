@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (159 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (160 tests). It needs `.venv` on Python
   3.14, built from `requirements_test.txt` as `AGENTS.md` describes (harness
   0.13.375 = HA 2026.10.4; the 3.12 / HA 2025.1 harness had no subentries).
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 24
@@ -61,7 +61,7 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: **v2.1.0**. Release notes on GitHub carry the per-version
+- Latest release: **v2.1.1**. Release notes on GitHub carry the per-version
   history; what follows is the shape of the code now.
 - **Appliances are config subentries** of type `appliance` (unique id = the
   appliance entity; data = the per-appliance dict plus `balancing_enabled`).
@@ -71,7 +71,11 @@ Production installs the fork through the Home Assistant Marketplace
 - **Per-appliance entities** (`appliance_entities.py`): switch "PLB enable",
   diagnostic sensor "PLB learned draw", diagnostic binary sensor "PLB shed".
   They link to the appliance's device (else its power sensor's) by setting
-  `entity.device_entry`, the core helper pattern. Never give them a
+  `entity.device_entry`, the core helper pattern. A device removed and added
+  back (the generic water heater rebuilds its device at startup) keeps its
+  id but clears every foreign entity's `device_id`, so each entity watches
+  its appliance, its sensor and the device registry and relinks itself
+  (`_async_relink`). Never give them a
   `device_info` with another device's identifiers: that would add this
   entry to that device. No device at all: named "<title> PLB ...".
   Switching balancing off removes the appliance from the shared

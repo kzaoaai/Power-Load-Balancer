@@ -8,6 +8,13 @@ looks at that appliance, the way Home Assistant's own helpers attach to the
 device they wrap: by setting `device_entry`, which links the entity without
 adding this integration to that device. An appliance with no device of its
 own (a template switch, say) still gets the entities, named after it.
+
+A device that is removed and added back takes its old id, but every entity of
+another integration on it loses its link on the way (the entity registry sets
+`device_id` to None on removal). Some integrations do exactly that while
+starting -- the generic water heater rebuilds its device -- so each entity
+watches its appliance and power sensor, and the device registry, and links
+itself again once the device is back.
 """
 
 from __future__ import annotations
@@ -15,9 +22,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from homeassistant.const import CONF_ENTITY_ID
-from homeassistant.core import callback
+from homeassistant.core import Event, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device import async_entity_id_to_device
+from homeassistant.helpers.device_registry import EVENT_DEVICE_REGISTRY_UPDATED
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.event import async_track_entity_registry_updated_event
 
 from .const import CONF_APPLIANCE, SUBENTRY_APPLIANCE
 
@@ -26,6 +36,7 @@ if TYPE_CHECKING:
 
     from homeassistant.config_entries import ConfigEntry, ConfigSubentry
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.device_registry import DeviceEntry
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
     from .power_balancer import PowerLoadBalancer
@@ -52,10 +63,9 @@ class ApplianceEntity(Entity):
             f"{balancer.entry.entry_id}_{subentry.subentry_id}_{self.entity_key}"
         )
         self._attr_translation_key = self.entity_key
-        device = async_entity_id_to_device(hass, self._appliance)
         sensor = subentry.data.get(CONF_ENTITY_ID)
-        if device is None and isinstance(sensor, str):
-            device = async_entity_id_to_device(hass, sensor)
+        self._sensor: str | None = sensor if isinstance(sensor, str) else None
+        device = self._resolve_device(hass)
         if device is not None:
             self.device_entry = device
             self._attr_has_entity_name = True
@@ -63,10 +73,47 @@ class ApplianceEntity(Entity):
             self._attr_has_entity_name = False
             self._attr_name = f"{subentry.title} {self.fallback_label}"
 
+    def _resolve_device(self, hass: HomeAssistant) -> DeviceEntry | None:
+        """Return the appliance's device, else its power sensor's, else None."""
+        device = async_entity_id_to_device(hass, self._appliance)
+        if device is None and self._sensor:
+            device = async_entity_id_to_device(hass, self._sensor)
+        return device
+
     async def async_added_to_hass(self) -> None:
-        """Follow the balancer's changes for this appliance."""
+        """Follow the balancer's changes for this appliance, and its device."""
         await super().async_added_to_hass()
         self.async_on_remove(self._balancer.add_appliance_listener(self._refresh))
+        if not self._attr_has_entity_name:
+            return
+        watched = [self._appliance, *([self._sensor] if self._sensor else [])]
+        self.async_on_remove(
+            async_track_entity_registry_updated_event(
+                self.hass, watched, self._async_relink
+            )
+        )
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                EVENT_DEVICE_REGISTRY_UPDATED, self._async_relink
+            )
+        )
+        self._async_relink()
+
+    @callback
+    def _async_relink(self, _event: Event | None = None) -> None:
+        """
+        Link the entity to its appliance's device again if it lost the link.
+
+        Only for an entity created on a device: one named after its appliance
+        keeps that name until the next reload.
+        """
+        entry = self.registry_entry
+        if entry is None:
+            return
+        device = self._resolve_device(self.hass)
+        if device is None or entry.device_id == device.id:
+            return
+        er.async_get(self.hass).async_update_entity(self.entity_id, device_id=device.id)
 
     @callback
     def _refresh(self) -> None:
