@@ -112,7 +112,27 @@ async def test_its_entities_sit_on_the_appliance_device(hass, world, setup_balan
         "the balancer claimed the heater's device as its own"
     )
     switch = _entity_of(hass, entry, UPSTAIRS, "switch", "appliance_balancing")
-    assert hass.states.get(switch).name == "Upstairs Load balancing"
+    assert hass.states.get(switch).name == "Upstairs PLB enable"
+
+
+async def test_its_entities_say_plb_and_its_sensors_are_diagnostic(
+    hass, world, setup_balancer
+):
+    """On another integration's page, each must say it is the balancer's."""
+    _register_on_device(hass, UPSTAIRS, "generic_water_heater", "Upstairs")
+    entry = await setup_balancer()
+
+    registry = er.async_get(hass)
+    expected = {
+        ("switch", "appliance_balancing"): ("Upstairs PLB enable", None),
+        ("sensor", "learned_draw"): ("Upstairs PLB learned draw", "diagnostic"),
+        ("binary_sensor", "shed_by_balancer"): ("Upstairs PLB shed", "diagnostic"),
+    }
+    for (platform, key), (name, category) in expected.items():
+        entity_id = _entity_of(hass, entry, UPSTAIRS, platform, key)
+        assert hass.states.get(entity_id).name == name
+        found = registry.async_get(entity_id).entity_category
+        assert (found.value if found else None) == category, f"{key} is {found}"
 
 
 async def test_a_plug_meter_device_is_used_when_the_appliance_has_none(
@@ -134,7 +154,7 @@ async def test_with_no_device_at_all_the_entities_carry_the_appliance_name(
 
     switch = _entity_of(hass, entry, UPSTAIRS, "switch", "appliance_balancing")
     assert er.async_get(hass).async_get(switch).device_id is None
-    assert hass.states.get(switch).name == "Upstairs Tank load balancing"
+    assert hass.states.get(switch).name == "Upstairs Tank PLB enable"
 
 
 async def test_an_appliance_switched_off_is_never_shed(
@@ -291,3 +311,20 @@ async def test_a_repair_left_from_before_is_cleared_at_startup(
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_an_existing_sensor_turns_diagnostic_on_upgrade(
+    hass, world, setup_balancer
+):
+    """Entities registered by v2.0.0 had no category; the next load sets it."""
+    entry = await setup_balancer()
+    registry = er.async_get(hass)
+    entity_id = _entity_of(hass, entry, UPSTAIRS, "sensor", "learned_draw")
+    registry.async_update_entity(entity_id, entity_category=None)
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    found = registry.async_get(entity_id).entity_category
+    assert found is not None
+    assert found.value == "diagnostic"

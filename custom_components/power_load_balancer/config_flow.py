@@ -488,26 +488,6 @@ def _main_sensor_schema(config_data: dict[str, Any]) -> vol.Schema:
             CONF_POWER_BUDGET_WATT,
             **({"default": budget} if budget is not None else {}),
         ): int,
-        vol.Optional(
-            CONF_BUDGET_SOURCE_ENTITY,
-            description={"suggested_value": source},
-        ): EntitySelector(
-            EntitySelectorConfig(domain=["sensor", "select", "input_select"])
-        ),
-        vol.Optional(
-            CONF_BUDGET_RAISE_DELAY_SECONDS,
-            default=config_data.get(
-                CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
-            ),
-        ): NumberSelector(
-            NumberSelectorConfig(
-                min=0,
-                max=3600,
-                step=1,
-                mode=NumberSelectorMode.BOX,
-                unit_of_measurement="s",
-            )
-        ),
         vol.Required(
             CONF_COOLDOWN_SECONDS,
             default=config_data.get(CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS),
@@ -524,18 +504,13 @@ def _store_main_sensor_input(
     Validate the main settings form and store it; return any errors.
 
     Choosing a fixed budget forgets the source entity but keeps its per-state
-    budgets, so switching back offers them again. Choosing a different source
-    entity starts its budgets afresh: the old states mean nothing to it.
+    budgets, so switching back offers them again. A variable budget picks its
+    source on the per-state page that follows.
     """
     errors: dict[str, str] = {}
     power_budget = user_input.get(CONF_POWER_BUDGET_WATT)
     if not isinstance(power_budget, int) or power_budget <= 0:
         errors[CONF_POWER_BUDGET_WATT] = "valid_budget_required"
-    mode = user_input.get(CONF_BUDGET_MODE, BUDGET_MODE_FIXED)
-    source = user_input.get(CONF_BUDGET_SOURCE_ENTITY)
-    if mode == BUDGET_MODE_SOURCE and not source:
-        errors[CONF_BUDGET_SOURCE_ENTITY] = "source_entity_required"
-    if errors:
         return errors
 
     config_data[CONF_MAIN_POWER_SENSOR] = user_input[CONF_MAIN_POWER_SENSOR]
@@ -547,20 +522,14 @@ def _store_main_sensor_input(
         else DEFAULT_COOLDOWN_SECONDS
     )
     _store_sustained_options(config_data, user_input)
-
-    if mode == BUDGET_MODE_SOURCE:
-        previous = config_data.get(CONF_BUDGET_SOURCE_ENTITY)
-        if previous and previous != source:
-            config_data[CONF_BUDGET_SOURCE_MAP] = {}
-        config_data[CONF_BUDGET_SOURCE_ENTITY] = source
-        config_data[CONF_BUDGET_RAISE_DELAY_SECONDS] = int(
-            user_input.get(
-                CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
-            )
-        )
-    else:
+    if user_input.get(CONF_BUDGET_MODE, BUDGET_MODE_FIXED) != BUDGET_MODE_SOURCE:
         config_data.pop(CONF_BUDGET_SOURCE_ENTITY, None)
     return {}
+
+
+def _wants_variable_budget(user_input: dict[str, Any]) -> bool:
+    """Return whether the main settings asked for a budget that follows."""
+    return user_input.get(CONF_BUDGET_MODE) == BUDGET_MODE_SOURCE
 
 
 async def _recorded_states(hass: HomeAssistant, entity_id: str) -> list[str]:
@@ -629,12 +598,49 @@ async def _known_source_states(
     return [*states[:room], *configured]
 
 
-def _budget_states_schema(states: list[str], prefill: dict[str, Any]) -> vol.Schema:
-    """Return one budget field per source state, plus a field to add states."""
+def _raise_delay_selector() -> NumberSelector:
+    """Return the selector for the delay before a higher budget applies."""
+    return NumberSelector(
+        NumberSelectorConfig(
+            min=0,
+            max=3600,
+            step=1,
+            mode=NumberSelectorMode.BOX,
+            unit_of_measurement="s",
+        )
+    )
+
+
+def _budget_states_schema(
+    config_data: dict[str, Any], states: list[str], prefill: dict[str, Any]
+) -> vol.Schema:
+    """
+    Return the variable budget form: its source, then one field per state.
+
+    Until a source is chosen there are no states to ask about, so the form is
+    the source and the delay alone.
+    """
+    source = config_data.get(CONF_BUDGET_SOURCE_ENTITY)
     fields: dict[Any, Any] = {
         vol.Optional(
-            state, description={"suggested_value": prefill.get(state)}
-        ): NumberSelector(
+            CONF_BUDGET_SOURCE_ENTITY,
+            description={"suggested_value": source},
+        ): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "select", "input_select"])
+        ),
+        vol.Optional(
+            CONF_BUDGET_RAISE_DELAY_SECONDS,
+            default=config_data.get(
+                CONF_BUDGET_RAISE_DELAY_SECONDS, DEFAULT_BUDGET_RAISE_DELAY_SECONDS
+            ),
+        ): _raise_delay_selector(),
+    }
+    if not source:
+        return vol.Schema(fields)
+    for state in states:
+        fields[
+            vol.Optional(state, description={"suggested_value": prefill.get(state)})
+        ] = NumberSelector(
             NumberSelectorConfig(
                 min=1,
                 max=1_000_000,
@@ -642,21 +648,27 @@ def _budget_states_schema(states: list[str], prefill: dict[str, Any]) -> vol.Sch
                 mode=NumberSelectorMode.BOX,
             )
         )
-        for state in states
-    }
     fields[vol.Optional(ADD_STATES_FIELD, default=[])] = SelectSelector(
         SelectSelectorConfig(options=[], multiple=True, custom_value=True)
     )
     return vol.Schema(fields)
 
 
+_BUDGET_FORM_KEYS = frozenset(
+    {CONF_BUDGET_SOURCE_ENTITY, CONF_BUDGET_RAISE_DELAY_SECONDS, ADD_STATES_FIELD}
+)
+
+
 class _BudgetStatesStep:
     """
-    The per-state budget form, shared by the config and options flows.
+    The variable budget form, shared by the config and options flows.
 
-    Shown after the main settings when the budget follows a source entity.
-    A state left blank has no budget of its own: while the source reports
-    it, the budget stays where it was.
+    Shown after the main settings when the budget is variable. The source is
+    picked on the same page as the budgets: choosing one, or a different one,
+    and submitting lists its states. A different source starts its budgets
+    afresh, since the old states mean nothing to it. A state left blank has
+    no budget of its own: while the source reports it, the budget stays where
+    it was.
     """
 
     hass: HomeAssistant
@@ -670,54 +682,87 @@ class _BudgetStatesStep:
     async def async_step_budget_states(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask for the budget that goes with each state of the source."""
-        entity_id: str = self._config_data[CONF_BUDGET_SOURCE_ENTITY]
-        saved: dict[str, int] = dict(
-            self._config_data.get(CONF_BUDGET_SOURCE_MAP) or {}
-        )
+        """Ask for the budget source and the budget for each of its states."""
+        entity_id: str | None = self._config_data.get(CONF_BUDGET_SOURCE_ENTITY)
         added = getattr(self, "_added_source_states", [])
         errors: dict[str, str] = {}
-        prefill: dict[str, Any] = saved
+        prefill: dict[str, Any] = dict(
+            self._config_data.get(CONF_BUDGET_SOURCE_MAP) or {}
+        )
 
         if user_input is not None:
-            entered = {
-                state: int(value)
-                for state, value in user_input.items()
-                if state != ADD_STATES_FIELD and value not in (None, "")
-            }
-            new_states = [
-                str(value).strip()
-                for value in user_input.get(ADD_STATES_FIELD) or []
-                if str(value).strip()
-            ]
-            prefill = entered
-            if new_states:
-                self._added_source_states = [
-                    *added,
-                    *(value for value in new_states if value not in added),
-                ]
-                added = self._added_source_states
-            elif not entered:
-                errors["base"] = "budget_map_required"
+            delay = user_input.get(CONF_BUDGET_RAISE_DELAY_SECONDS)
+            if isinstance(delay, (int, float)):
+                self._config_data[CONF_BUDGET_RAISE_DELAY_SECONDS] = int(delay)
+            picked = user_input.get(CONF_BUDGET_SOURCE_ENTITY)
+            if not picked:
+                errors[CONF_BUDGET_SOURCE_ENTITY] = "source_entity_required"
+            elif picked != entity_id:
+                if entity_id:
+                    self._config_data[CONF_BUDGET_SOURCE_MAP] = {}
+                    prefill = {}
+                self._config_data[CONF_BUDGET_SOURCE_ENTITY] = picked
+                self._added_source_states = added = []
+                entity_id = picked
             else:
-                self._config_data[CONF_BUDGET_SOURCE_MAP] = entered
-                self._added_source_states = []
-                return await self._async_return_to_menu()
+                result = await self._async_take_budgets(user_input, added, errors)
+                if result is not None:
+                    return result
+                prefill = {
+                    state: value
+                    for state, value in user_input.items()
+                    if state not in _BUDGET_FORM_KEYS
+                }
+                added = self._added_source_states
 
-        states = await _known_source_states(self.hass, entity_id, [*saved, *added])
-        source = self.hass.states.get(entity_id)
-        name = (
-            source.attributes.get("friendly_name", entity_id) if source else entity_id
-        )
+        states: list[str] = []
+        if entity_id:
+            states = await _known_source_states(
+                self.hass,
+                entity_id,
+                [*(self._config_data.get(CONF_BUDGET_SOURCE_MAP) or {}), *added],
+            )
         return self.async_show_form(  # type: ignore[attr-defined]
             step_id="budget_states",
-            data_schema=_budget_states_schema(states, prefill),
+            data_schema=_budget_states_schema(self._config_data, states, prefill),
             errors=errors,
             description_placeholders={
-                "source": str(name),
                 "budget": str(self._config_data.get(CONF_POWER_BUDGET_WATT)),
             },
         )
+
+    async def _async_take_budgets(
+        self, user_input: dict[str, Any], added: list[str], errors: dict[str, str]
+    ) -> ConfigFlowResult | None:
+        """
+        Store the budgets entered for the source's states, or note what is missing.
+
+        Typed-in states get a field of their own and the form comes back;
+        otherwise at least one budget is needed.
+        """
+        entered = {
+            state: int(value)
+            for state, value in user_input.items()
+            if state not in _BUDGET_FORM_KEYS and value not in (None, "")
+        }
+        new_states = [
+            str(value).strip()
+            for value in user_input.get(ADD_STATES_FIELD) or []
+            if str(value).strip()
+        ]
+        self._added_source_states = added
+        if new_states:
+            self._added_source_states = [
+                *added,
+                *(value for value in new_states if value not in added),
+            ]
+            return None
+        if not entered:
+            errors["base"] = "budget_map_required"
+            return None
+        self._config_data[CONF_BUDGET_SOURCE_MAP] = entered
+        self._added_source_states = []
+        return await self._async_return_to_menu()
 
 
 def _process_sensor_input(
@@ -893,7 +938,7 @@ class PowerLoadBalancerConfigFlow(_BudgetStatesStep, ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             errors = _store_main_sensor_input(self._config_data, dict(user_input))
             if not errors:
-                if self._config_data.get(CONF_BUDGET_SOURCE_ENTITY):
+                if _wants_variable_budget(dict(user_input)):
                     return await self.async_step_budget_states()
                 return await self._async_create()
 
@@ -1011,7 +1056,7 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
         if user_input is not None:
             errors = _store_main_sensor_input(self._config_data, dict(user_input))
             if not errors:
-                if self._config_data.get(CONF_BUDGET_SOURCE_ENTITY):
+                if _wants_variable_budget(dict(user_input)):
                     return await self.async_step_budget_states()
                 return await self.async_step_init()
 

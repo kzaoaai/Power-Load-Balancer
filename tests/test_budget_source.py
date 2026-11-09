@@ -112,6 +112,13 @@ def _main_input(**changes: object) -> dict:
     }
 
 
+async def _pick(hass, result, entity_id: str = SOURCE):
+    """Choose the source on the variable budget page, which lists its states."""
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"budget_source_entity": entity_id}
+    )
+
+
 def _offered(result) -> list[str]:
     return [str(key) for key in result["data_schema"].schema]
 
@@ -127,7 +134,7 @@ async def _finish(hass, result):
 async def test_a_variable_budget_is_set_per_state_in_the_main_settings(
     hass, world, setup_balancer
 ):
-    """Pick the entity in the main form, then one field per state it takes."""
+    """Pick variable, then the entity and one field per state it takes."""
     hass.states.async_set(
         SOURCE, "Solar", {"options": ["Solar", "Battery", "Utility", "Generator"]}
     )
@@ -135,16 +142,22 @@ async def test_a_variable_budget_is_set_per_state_in_the_main_settings(
     result = await _main_form(hass, entry)
     assert "budget_mode" in _offered(result)
 
+    assert "budget_source_entity" not in _offered(result)
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], _main_input(budget_mode="source")
+    )
+    assert result["step_id"] == "budget_states"
+    assert _offered(result) == ["budget_source_entity", "budget_raise_delay_seconds"]
+
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        _main_input(
-            budget_mode="source",
-            budget_source_entity=SOURCE,
-            budget_raise_delay_seconds=30,
-        ),
+        {"budget_source_entity": SOURCE, "budget_raise_delay_seconds": 30},
     )
     assert result["step_id"] == "budget_states"
     assert _offered(result) == [
+        "budget_source_entity",
+        "budget_raise_delay_seconds",
         "Solar",
         "Battery",
         "Utility",
@@ -153,7 +166,14 @@ async def test_a_variable_budget_is_set_per_state_in_the_main_settings(
     ]
 
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"Generator": 4400, "Utility": 8200.0, "add_states": []}
+        result["flow_id"],
+        {
+            "budget_source_entity": SOURCE,
+            "budget_raise_delay_seconds": 30,
+            "Generator": 4400,
+            "Utility": 8200.0,
+            "add_states": [],
+        },
     )
     assert result["step_id"] == "init"
     await _finish(hass, result)
@@ -171,19 +191,21 @@ async def test_a_state_the_entity_does_not_declare_can_be_added(
     entry = await setup_balancer()
     result = await _main_form(hass, entry)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        _main_input(budget_mode="source", budget_source_entity=SOURCE),
+        result["flow_id"], _main_input(budget_mode="source")
     )
-    assert _offered(result) == ["Solar", "add_states"]
+    result = await _pick(hass, result)
+    assert _offered(result)[2:] == ["Solar", "add_states"]
 
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"Solar": 8000, "add_states": ["Generator"]}
+        result["flow_id"],
+        {"budget_source_entity": SOURCE, "Solar": 8000, "add_states": ["Generator"]},
     )
     assert result["step_id"] == "budget_states"
-    assert _offered(result) == ["Solar", "Generator", "add_states"]
+    assert _offered(result)[2:] == ["Solar", "Generator", "add_states"]
 
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"Solar": 8000, "Generator": 4400}
+        result["flow_id"],
+        {"budget_source_entity": SOURCE, "Solar": 8000, "Generator": 4400},
     )
     await _finish(hass, result)
     assert entry.data["budget_source_map"] == {"Solar": 8000, "Generator": 4400}
@@ -195,22 +217,55 @@ async def test_the_per_state_form_needs_one_budget(hass, world, setup_balancer):
     entry = await setup_balancer()
     result = await _main_form(hass, entry)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        _main_input(budget_mode="source", budget_source_entity=SOURCE),
+        result["flow_id"], _main_input(budget_mode="source")
     )
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    result = await _pick(hass, result)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"budget_source_entity": SOURCE}
+    )
     assert result["errors"] == {"base": "budget_map_required"}
 
 
 async def test_a_variable_budget_needs_an_entity(hass, world, setup_balancer):
-    """Variable with nothing to follow is refused on the main form."""
+    """Variable with nothing to follow is refused on its own page."""
     entry = await setup_balancer()
     result = await _main_form(hass, entry)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], _main_input(budget_mode="source")
     )
-    assert result["step_id"] == "edit_main_sensor"
+    assert result["step_id"] == "budget_states"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["step_id"] == "budget_states"
     assert result["errors"] == {"budget_source_entity": "source_entity_required"}
+
+
+async def test_a_different_source_lists_its_own_states_afresh(
+    hass, world, setup_balancer
+):
+    """Changing the entity on the page re-lists states and drops old budgets."""
+    other = "select.other_source"
+    hass.states.async_set(SOURCE, "Generator")
+    hass.states.async_set(other, "Day", {"options": ["Day", "Night"]})
+    entry = await _setup(hass, setup_balancer, "Generator")
+    result = await _main_form(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], _main_input(budget_mode="source")
+    )
+    assert result["step_id"] == "budget_states"
+    assert set(SOURCE_MAP) <= set(_offered(result)), "saved states not offered"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"budget_source_entity": other, "Generator": 4400}
+    )
+    assert result["step_id"] == "budget_states"
+    assert _offered(result)[2:] == ["Day", "Night", "add_states"]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"budget_source_entity": other, "Night": 3000}
+    )
+    await _finish(hass, result)
+    assert entry.data["budget_source_entity"] == other
+    assert entry.data["budget_source_map"] == {"Night": 3000}
 
 
 async def test_switching_to_fixed_stops_following_but_keeps_the_states(

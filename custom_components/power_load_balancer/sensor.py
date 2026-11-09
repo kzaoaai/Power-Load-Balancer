@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import UnitOfPower
+from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -69,8 +69,9 @@ class ApplianceLearnedDrawSensor(ApplianceEntity, SensorEntity):
     """
 
     entity_key = "learned_draw"
-    fallback_label = "learned power draw"
+    fallback_label = "PLB learned draw"
     _attr_device_class = SensorDeviceClass.POWER
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_icon = "mdi:chart-bell-curve"
 

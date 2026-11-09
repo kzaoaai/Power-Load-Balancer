@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (156 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (159 tests). It needs `.venv` on Python
   3.14, built from `requirements_test.txt` as `AGENTS.md` describes (harness
   0.13.375 = HA 2026.10.4; the 3.12 / HA 2025.1 harness had no subentries).
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 24
@@ -85,7 +85,7 @@ Production installs the fork through the Home Assistant Marketplace
 - Configuration lives in `entry.data`; the options flow and the budget
   number write there. Do not reintroduce a copy in `options`.
 - CI: `validate.yml` (hassfest, HACS) and `tests.yml` (ruff format
-  check, pytest on Python 3.12). The inherited `format.yml`, which
+  check, pytest on Python 3.14). The inherited `format.yml`, which
   pushed formatting commits to `main`, was removed on 2026-11-08.
   GitHub holds workflows on a fork until they are enabled in its
   Actions tab.

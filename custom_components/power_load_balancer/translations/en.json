@@ -6,8 +6,6 @@
           "main_power_sensor": "Main Power Sensor",
           "budget_mode": "Power budget",
           "power_budget_watt": "Power budget (W or VA, same unit as the main power sensor)",
-          "budget_source_entity": "Budget source",
-          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)",
           "cooldown_seconds": "Cooldown Time (seconds)",
           "sustained_shedding_enabled": "Enable sustained-load shedding",
           "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
@@ -16,20 +14,22 @@
         "description": "Choose the main power meter and the budget. Add appliances afterwards from the integration page.",
         "title": "Power Load Balancer setup",
         "data_description": {
-          "budget_mode": "Fixed keeps one budget. Variable follows another entity, such as a sensor naming the supply carrying the house, with a budget for each of its states; you set those on the next page.",
-          "power_budget_watt": "With a variable budget, this is the budget at startup and while the source reports a state without a budget of its own.",
-          "budget_source_entity": "Only used by a variable budget: a sensor, select or input select whose state picks the budget.",
-          "budget_raise_delay_seconds": "Only used by a variable budget. A lower budget applies at once; a higher one waits this long, so a supply that comes back for a moment does not get appliances restored onto it."
+          "budget_mode": "Fixed keeps one budget. Variable follows another entity, such as a sensor naming the supply carrying the house, with a budget for each of its states; you pick it and set those on the next page.",
+          "power_budget_watt": "With a variable budget, this is the budget at startup and while the source reports a state without a budget of its own."
         }
       },
       "budget_states": {
-        "title": "Budget for each state",
-        "description": "Enter the budget that applies while {source} reports each state. Leave a state blank to keep the current budget while it is reported. Your fixed budget, {budget}, is the starting point.",
+        "title": "Variable budget",
+        "description": "Pick the entity whose state chooses the budget and press Submit to list its states, then enter the budget for each. Leave a state blank to keep the current budget while it is reported. Your fixed budget, {budget}, is the starting point. Picking a different entity starts its budgets afresh.",
         "data": {
-          "add_states": "Add states not listed"
+          "add_states": "Add states not listed",
+          "budget_source_entity": "Budget source",
+          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)"
         },
         "data_description": {
-          "add_states": "Type a state exactly as the entity reports it, capitals included, and press Submit to get a field for it."
+          "add_states": "Type a state exactly as the entity reports it, capitals included, and press Submit to get a field for it.",
+          "budget_source_entity": "A sensor, select or input select whose state picks the budget.",
+          "budget_raise_delay_seconds": "A lower budget applies at once; a higher one waits this long, so a supply that comes back for a moment does not get appliances restored onto it."
         }
       }
     },
@@ -109,8 +109,6 @@
           "main_power_sensor": "Main Power Sensor",
           "budget_mode": "Power budget",
           "power_budget_watt": "Power budget (W or VA, same unit as the main power sensor)",
-          "budget_source_entity": "Budget source",
-          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)",
           "cooldown_seconds": "Cooldown Time (seconds)",
           "sustained_shedding_enabled": "Enable sustained-load shedding",
           "sustained_threshold_percent": "Sustained-load threshold (% of budget)",
@@ -119,10 +117,8 @@
         "description": "Edit the main power sensor, power budget, and cooldown settings.",
         "title": "Edit Main Sensor Settings",
         "data_description": {
-          "budget_mode": "Fixed keeps one budget. Variable follows another entity, such as a sensor naming the supply carrying the house, with a budget for each of its states; you set those on the next page.",
-          "power_budget_watt": "With a variable budget, this is the budget at startup and while the source reports a state without a budget of its own.",
-          "budget_source_entity": "Only used by a variable budget: a sensor, select or input select whose state picks the budget.",
-          "budget_raise_delay_seconds": "Only used by a variable budget. A lower budget applies at once; a higher one waits this long, so a supply that comes back for a moment does not get appliances restored onto it."
+          "budget_mode": "Fixed keeps one budget. Variable follows another entity, such as a sensor naming the supply carrying the house, with a budget for each of its states; you pick it and set those on the next page.",
+          "power_budget_watt": "With a variable budget, this is the budget at startup and while the source reports a state without a budget of its own."
         }
       },
       "edit_notifications": {
@@ -137,13 +133,17 @@
         }
       },
       "budget_states": {
-        "title": "Budget for each state",
-        "description": "Enter the budget that applies while {source} reports each state. Leave a state blank to keep the current budget while it is reported. Your fixed budget, {budget}, is the starting point.",
+        "title": "Variable budget",
+        "description": "Pick the entity whose state chooses the budget and press Submit to list its states, then enter the budget for each. Leave a state blank to keep the current budget while it is reported. Your fixed budget, {budget}, is the starting point. Picking a different entity starts its budgets afresh.",
         "data": {
-          "add_states": "Add states not listed"
+          "add_states": "Add states not listed",
+          "budget_source_entity": "Budget source",
+          "budget_raise_delay_seconds": "Delay before a higher budget applies (seconds)"
         },
         "data_description": {
-          "add_states": "Type a state exactly as the entity reports it, capitals included, and press Submit to get a field for it."
+          "add_states": "Type a state exactly as the entity reports it, capitals included, and press Submit to get a field for it.",
+          "budget_source_entity": "A sensor, select or input select whose state picks the budget.",
+          "budget_raise_delay_seconds": "A lower budget applies at once; a higher one waits this long, so a supply that comes back for a moment does not get appliances restored onto it."
         }
       }
     },
@@ -160,7 +160,7 @@
         "name": "Enabled"
       },
       "appliance_balancing": {
-        "name": "Load balancing"
+        "name": "PLB enable"
       }
     },
     "number": {
@@ -173,12 +173,12 @@
         "name": "Pending Actions"
       },
       "learned_draw": {
-        "name": "Learned power draw"
+        "name": "PLB learned draw"
       }
     },
     "binary_sensor": {
       "shed_by_balancer": {
-        "name": "Shed by load balancer"
+        "name": "PLB shed"
       }
     }
   },

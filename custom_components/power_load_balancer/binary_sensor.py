@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.const import EntityCategory
 
 from .appliance_entities import ApplianceEntity, add_appliance_entities
 from .const import DOMAIN
@@ -40,7 +41,8 @@ class ApplianceShedSensor(ApplianceEntity, BinarySensorEntity):
     """
 
     entity_key = "shed_by_balancer"
-    fallback_label = "shed by load balancer"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    fallback_label = "PLB shed"
     _attr_icon = "mdi:power-plug-off-outline"
 
     @property

@@ -6,8 +6,6 @@
           "main_power_sensor": "Sensore di potenza principale",
           "budget_mode": "Budget di potenza",
           "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)",
-          "budget_source_entity": "Sorgente del budget",
-          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)",
           "cooldown_seconds": "Tempo di attesa (secondi)",
           "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
           "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
@@ -16,20 +14,22 @@
         "description": "Scegli il contatore principale e il budget. Aggiungi gli apparecchi dopo, dalla pagina dell'integrazione.",
         "title": "Configurazione di Power Load Balancer",
         "data_description": {
-          "budget_mode": "Fisso mantiene un solo budget. Variabile segue un'altra entità, ad esempio un sensore che indica la fonte che alimenta la casa, con un budget per ciascuno dei suoi stati; li imposti nella pagina successiva.",
-          "power_budget_watt": "Con un budget variabile, è il budget all'avvio e mentre la sorgente riporta uno stato senza un budget proprio.",
-          "budget_source_entity": "Usato solo dal budget variabile: un sensore, select o input select il cui stato sceglie il budget.",
-          "budget_raise_delay_seconds": "Usato solo dal budget variabile. Un budget più basso si applica subito; uno più alto attende questo tempo, così una fonte che torna per un attimo non riceve di nuovo gli apparecchi."
+          "budget_mode": "Fisso mantiene un solo budget. Variabile segue un'altra entità, ad esempio un sensore che indica la fonte che alimenta la casa, con un budget per ciascuno dei suoi stati; la scegli e li imposti nella pagina successiva.",
+          "power_budget_watt": "Con un budget variabile, è il budget all'avvio e mentre la sorgente riporta uno stato senza un budget proprio."
         }
       },
       "budget_states": {
-        "title": "Budget per ogni stato",
-        "description": "Inserisci il budget da applicare mentre {source} riporta ciascuno stato. Lascia vuoto uno stato per mantenere il budget attuale mentre è riportato. Il budget fisso, {budget}, è il punto di partenza.",
+        "title": "Budget variabile",
+        "description": "Scegli l'entità il cui stato decide il budget e premi Invia per elencarne gli stati, poi inserisci il budget per ciascuno. Lascia vuoto uno stato per mantenere il budget attuale mentre è riportato. Il budget fisso, {budget}, è il punto di partenza. Scegliendo un'altra entità i budget ripartono da zero.",
         "data": {
-          "add_states": "Aggiungi stati non elencati"
+          "add_states": "Aggiungi stati non elencati",
+          "budget_source_entity": "Sorgente del budget",
+          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)"
         },
         "data_description": {
-          "add_states": "Scrivi lo stato esattamente come lo riporta l'entità, maiuscole comprese, e premi Invia per ottenere un campo."
+          "add_states": "Scrivi lo stato esattamente come lo riporta l'entità, maiuscole comprese, e premi Invia per ottenere un campo.",
+          "budget_source_entity": "Un sensore, select o input select il cui stato sceglie il budget.",
+          "budget_raise_delay_seconds": "Un budget più basso si applica subito; uno più alto attende questo tempo, così una fonte che torna per un attimo non riceve di nuovo gli apparecchi."
         }
       }
     },
@@ -109,8 +109,6 @@
           "main_power_sensor": "Sensore di potenza principale",
           "budget_mode": "Budget di potenza",
           "power_budget_watt": "Budget di potenza (W o VA, stessa unità del sensore principale)",
-          "budget_source_entity": "Sorgente del budget",
-          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)",
           "cooldown_seconds": "Tempo di attesa (secondi)",
           "sustained_shedding_enabled": "Abilita la riduzione per carico prolungato",
           "sustained_threshold_percent": "Soglia di carico prolungato (% del budget)",
@@ -119,10 +117,8 @@
         "description": "Modifica il sensore di potenza principale, il budget di potenza e le impostazioni di attesa.",
         "title": "Modifica impostazioni sensore principale",
         "data_description": {
-          "budget_mode": "Fisso mantiene un solo budget. Variabile segue un'altra entità, ad esempio un sensore che indica la fonte che alimenta la casa, con un budget per ciascuno dei suoi stati; li imposti nella pagina successiva.",
-          "power_budget_watt": "Con un budget variabile, è il budget all'avvio e mentre la sorgente riporta uno stato senza un budget proprio.",
-          "budget_source_entity": "Usato solo dal budget variabile: un sensore, select o input select il cui stato sceglie il budget.",
-          "budget_raise_delay_seconds": "Usato solo dal budget variabile. Un budget più basso si applica subito; uno più alto attende questo tempo, così una fonte che torna per un attimo non riceve di nuovo gli apparecchi."
+          "budget_mode": "Fisso mantiene un solo budget. Variabile segue un'altra entità, ad esempio un sensore che indica la fonte che alimenta la casa, con un budget per ciascuno dei suoi stati; la scegli e li imposti nella pagina successiva.",
+          "power_budget_watt": "Con un budget variabile, è il budget all'avvio e mentre la sorgente riporta uno stato senza un budget proprio."
         }
       },
       "edit_notifications": {
@@ -137,13 +133,17 @@
         }
       },
       "budget_states": {
-        "title": "Budget per ogni stato",
-        "description": "Inserisci il budget da applicare mentre {source} riporta ciascuno stato. Lascia vuoto uno stato per mantenere il budget attuale mentre è riportato. Il budget fisso, {budget}, è il punto di partenza.",
+        "title": "Budget variabile",
+        "description": "Scegli l'entità il cui stato decide il budget e premi Invia per elencarne gli stati, poi inserisci il budget per ciascuno. Lascia vuoto uno stato per mantenere il budget attuale mentre è riportato. Il budget fisso, {budget}, è il punto di partenza. Scegliendo un'altra entità i budget ripartono da zero.",
         "data": {
-          "add_states": "Aggiungi stati non elencati"
+          "add_states": "Aggiungi stati non elencati",
+          "budget_source_entity": "Sorgente del budget",
+          "budget_raise_delay_seconds": "Ritardo prima di applicare un budget più alto (secondi)"
         },
         "data_description": {
-          "add_states": "Scrivi lo stato esattamente come lo riporta l'entità, maiuscole comprese, e premi Invia per ottenere un campo."
+          "add_states": "Scrivi lo stato esattamente come lo riporta l'entità, maiuscole comprese, e premi Invia per ottenere un campo.",
+          "budget_source_entity": "Un sensore, select o input select il cui stato sceglie il budget.",
+          "budget_raise_delay_seconds": "Un budget più basso si applica subito; uno più alto attende questo tempo, così una fonte che torna per un attimo non riceve di nuovo gli apparecchi."
         }
       }
     },
@@ -160,7 +160,7 @@
         "name": "Abilitato"
       },
       "appliance_balancing": {
-        "name": "Bilanciamento del carico"
+        "name": "PLB abilitato"
       }
     },
     "number": {
@@ -173,12 +173,12 @@
         "name": "Azioni in sospeso"
       },
       "learned_draw": {
-        "name": "Potenza appresa"
+        "name": "PLB potenza appresa"
       }
     },
     "binary_sensor": {
       "shed_by_balancer": {
-        "name": "Spento dal bilanciatore"
+        "name": "PLB spento"
       }
     }
   },

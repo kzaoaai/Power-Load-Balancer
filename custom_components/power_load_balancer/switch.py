@@ -51,7 +51,7 @@ class ApplianceBalancingSwitch(ApplianceEntity, SwitchEntity):
     """
 
     entity_key = "appliance_balancing"
-    fallback_label = "load balancing"
+    fallback_label = "PLB enable"
     _attr_icon = "mdi:scale-balance"
 
     def __init__(
