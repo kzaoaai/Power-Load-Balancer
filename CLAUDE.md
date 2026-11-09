@@ -55,37 +55,49 @@ Production installs the fork through the Home Assistant Marketplace
 - `manifest.json` keeps the fork's identity on merges: its
   `documentation` and `issue_tracker` URLs and its version, with both
   maintainers in `codeowners`.
-- Translations: step-level `menu` blocks are dead (Home Assistant reads only
-  `menu_options`); the fork's menu labels come from `_build_menu_options()`
-  in `config_flow.py`. Flow `error` and `abort` strings belong at section
-  level, the only place Home Assistant reads them.
+- Translations: menu labels live under the step's `menu_options`. Flow
+  `error` and `abort` strings belong at section level, the only place Home
+  Assistant reads them.
 
 ## Current state and open items
 
-- Latest release: v2.0.0 (appliances are config subentries of type `appliance`, unique id = appliance entity, data = the old per-appliance dict plus `balancing_enabled`. `async_migrate_entry` 1.3 moves `data["power_sensors"]` into subentries, one-way. Setup rebuilds `power_sensors` (balanced only) and `all_appliances` (learner keeps disabled ones) from the subentries. Per appliance: switch `appliance_balancing`, sensor `learned_draw`, binary_sensor `shed_by_balancer`, linked to the appliance's device (else its power sensor's) by setting `entity.device_entry` -- the core helper pattern; never a `device_info` with the other device's identifiers, which would claim that device. Switching balancing off restores a held-off appliance after removing it from the shared `_monitored_sensors` list in place, then writes the subentry, which reloads. Options flow is now a native menu (main settings, notifications, save); setup is one form. Also carries the unreleased v1.6.0 below). v1.6.0 (the budget source moved into the main settings form as "Power budget: Fixed / Variable"; the separate "Budget by Power Source" menu entry and its `state = watts` text box are gone. Variable leads to a `budget_states` step with one number field per state: declared `options`, recorder history (30 days), current state, saved ones, plus an `add_states` custom-value field. The mode is not stored: a `budget_source_entity` means variable; fixed drops the entity and keeps the map; a different entity resets the map. Manifest gained `after_dependencies: [recorder]`). v1.5.0 (per-appliance "Power draw": learn, the default,
-  or fixed. Learning keeps the last 500 running readings (>= 50 W) of the
-  appliance's own sensor in a second Store, `<entry>.draw`, and uses the
-  95th percentile once 20 exist; it sizes the turn-on veto and, for learned
-  appliances, a restore at the larger of the draw at shed time and the
-  learned one. No `power_draw_mode` key means fixed when a nameplate is set,
-  learn otherwise (`resolve_power_draw_mode`), so no migration). v1.4.1 (restores 30 s apart; a restored appliance's draw is
-  reserved until its sensor shows it, at most 150 s, because generic water
-  heater staggers its own tanks and an idle tank reads zero; pending-actions
-  restores carry `shed_reason`, `shed_at`, `needs_watts`). v1.4.0 (the budget can follow a power-source sensor; lower
-  applies at once, higher after a delay, default 60 s). v1.3.4: restores go most important first and keep a
-  2% margin; a budget rise releases what its drop shed without a cooldown;
-  a budget change is acted on at once). v1.3.3: balancing pauses while the main meter has been
-  silent for 5 minutes; a timer restore no longer cancels itself). v1.3.1 carried the review fixes of 2026-11-08
-  (failed-but-landed sheds kept, own restores and reconnects not vetoed,
-  sheds remembered across restarts in a per-entry Store, shed-by-mode
-  restored by mode, smaller hardening). v1.3.2 moves the configuration
-  into `data` alone (`async_migrate_entry`, minor version 2: `options`
-  stays empty, legacy `notify_*` keys dropped) and tidies the manifest,
-  services, diagnostics, translations and README.
-- Configuration lives in `entry.data`; the options flow and the budget
-  number write there. Do not reintroduce a copy in `options`.
-- CI: `validate.yml` (hassfest, HACS) and `tests.yml` (ruff format
-  check, pytest on Python 3.14). The inherited `format.yml`, which
-  pushed formatting commits to `main`, was removed on 2026-11-08.
-  GitHub holds workflows on a fork until they are enabled in its
-  Actions tab.
+- Latest release: **v2.1.0**. Release notes on GitHub carry the per-version
+  history; what follows is the shape of the code now.
+- **Appliances are config subentries** of type `appliance` (unique id = the
+  appliance entity; data = the per-appliance dict plus `balancing_enabled`).
+  `async_migrate_entry` 1.3 moved `data["power_sensors"]` into subentries,
+  one-way. Setup rebuilds `power_sensors` (balanced only) and
+  `all_appliances` (the learner keeps disabled ones) from the subentries.
+- **Per-appliance entities** (`appliance_entities.py`): switch "PLB enable",
+  diagnostic sensor "PLB learned draw", diagnostic binary sensor "PLB shed".
+  They link to the appliance's device (else its power sensor's) by setting
+  `entity.device_entry`, the core helper pattern. Never give them a
+  `device_info` with another device's identifiers: that would add this
+  entry to that device. No device at all: named "<title> PLB ...".
+  Switching balancing off removes the appliance from the shared
+  `_monitored_sensors` list in place, restores it if held off, then writes
+  the subentry, which reloads.
+- **Budget**: Fixed or Variable on the main settings form. The mode is not
+  stored: a `budget_source_entity` means variable. Variable leads to the
+  `budget_states` step (`_BudgetStatesStep` in `config_flow.py`), which
+  holds the source picker, the raise delay and one number field per state
+  (declared `options`, 30 days of recorder history, current state, saved
+  ones, plus `add_states`). Submitting a new entity re-lists its states and
+  clears the map. Lower budget applies at once, higher after the delay.
+- **Shedding/restoring**: sheds persist across restarts in a per-entry
+  Store; restores go most important first, 30 s apart, with a 2% margin and
+  the restored draw reserved until its sensor shows it (max 150 s). Draw is
+  learned (95th percentile of the last 500 running readings >= 50 W, used
+  from 20) or fixed per appliance; no `power_draw_mode` means fixed when a
+  nameplate is set. Balancing pauses while the meter is silent 5 minutes.
+- Options flow: native menu (main settings, notifications, save).
+  Configuration lives in `entry.data` only; never reintroduce a copy in
+  `options`.
+- CI: `validate.yml` (hassfest, HACS) and `tests.yml` (ruff format check,
+  pytest on Python 3.14). GitHub holds workflows on a fork until they are
+  enabled in its Actions tab.
+- Open: `hacs.json` minimum HA (2025.8.0) is an estimate, not verified
+  against the first release with config subentries plus
+  `async_entity_id_to_device`.
+- Decided against (do not re-propose): a grace delay before a budget
+  drop applies; separate W and VA limits.
