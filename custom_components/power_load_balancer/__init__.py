@@ -278,8 +278,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry when options are updated."""
     balancer: PowerLoadBalancer | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if balancer and balancer.skip_reload:
-        balancer.skip_reload = False
+    if balancer and balancer.consume_skip_reload():
         return
     await hass.config_entries.async_reload(entry.entry_id)
 

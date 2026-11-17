@@ -139,7 +139,7 @@ class PowerLoadBalancer:
     _availability_events: list[dict[str, Any]]
     _non_controllable_media_players: set[str]
     _enabled: bool
-    _skip_reload: bool
+    _skip_reloads: int
 
     def __init__(  # noqa: PLR0915
         self,
@@ -172,7 +172,7 @@ class PowerLoadBalancer:
         self._availability_events = []
         self._non_controllable_media_players = set()
         self._enabled = True
-        self._skip_reload = False
+        self._skip_reloads = 0
 
         self._main_power_sensor_entity_id = config_data[CONF_MAIN_POWER_SENSOR]
         self._monitored_sensors = config_data.get(CONF_POWER_SENSORS, [])
@@ -984,15 +984,27 @@ class PowerLoadBalancer:
         if self._main_power_sensor_unsub is not None:
             self.async_check_and_balance()
 
-    @property
-    def skip_reload(self) -> bool:
-        """Return whether the next config update should skip reload."""
-        return self._skip_reload
+    def skip_next_reload(self) -> None:
+        """
+        Let the next write to the config entry pass without a reload.
 
-    @skip_reload.setter
-    def skip_reload(self, value: bool) -> None:
-        """Set whether the next config update should skip reload."""
-        self._skip_reload = value
+        Arm it right before a write and disarm it (cancel_skip_reload) when
+        the write changed nothing: an unchanged write calls no listener, and
+        a skip left armed swallowed the reload of the next real change.
+        Counted, so a batch of writes can each carry one.
+        """
+        self._skip_reloads += 1
+
+    def cancel_skip_reload(self) -> None:
+        """Disarm a skip whose write changed nothing."""
+        self._skip_reloads = max(self._skip_reloads - 1, 0)
+
+    def consume_skip_reload(self) -> bool:
+        """Return True, once per armed skip, when a write should not reload."""
+        if self._skip_reloads <= 0:
+            return False
+        self._skip_reloads -= 1
+        return True
 
     async def async_disable_and_restore(self) -> None:
         """Disable balancing and restore all balanced-off appliances."""

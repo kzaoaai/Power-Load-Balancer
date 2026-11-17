@@ -88,8 +88,9 @@ class PowerBudgetNumber(NumberEntity):
             return
         self._balancer.set_power_budget(new_budget)
 
-        # Set skip_reload so the update listener doesn't trigger a full reload
-        self._balancer.skip_reload = True
+        # The balancer already runs on the new budget; persisting it must not
+        # reload it.
+        self._balancer.skip_next_reload()
 
         # Persist to config entry so the value survives restarts. The
         # configuration lives in data; options are only touched if an entry
@@ -98,11 +99,14 @@ class PowerBudgetNumber(NumberEntity):
         new_options = dict(self._config_entry.options)
         if CONF_POWER_BUDGET_WATT in new_options:
             new_options[CONF_POWER_BUDGET_WATT] = new_budget
-        self.hass.config_entries.async_update_entry(
+        if not self.hass.config_entries.async_update_entry(
             self._config_entry,
             data=new_data,
             options=new_options,
-        )
+        ):
+            # A budget already stored (a variable budget moved the running
+            # one away from it) calls no listener to consume the skip.
+            self._balancer.cancel_skip_reload()
 
         _LOGGER.info("Power budget updated to %s W", new_budget)
         self.async_write_ha_state()

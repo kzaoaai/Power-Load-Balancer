@@ -95,6 +95,9 @@ from .notify_channels import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from homeassistant.config_entries import ConfigSubentry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.device_registry import DeviceRegistry
     from homeassistant.helpers.entity_registry import EntityRegistry
@@ -118,40 +121,102 @@ def _table_cell(value: object) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
-def _appliance_rows(entry: ConfigEntry) -> str:
+def _appliances_in_shed_order(
+    entry: ConfigEntry, importances: Mapping[str, float]
+) -> list[tuple[int | None, ConfigSubentry, float]]:
     """
-    Return the appliance table's rows, in the order the balancer sheds them.
+    Return each appliance with its shed rank and importance, in shed order.
 
-    Balanced appliances come first, numbered in shed order (shed_order, the
+    Balanced appliances come first, ranked in shed order (shed_order, the
     ladder's own sort, so the table cannot disagree with what the balancer
-    does). Those whose balancing is switched off follow with a dash: the
-    balancer never sheds them. The header lives in the translation, so only
-    the rows are built here.
+    does). Those whose balancing is switched off follow with no rank: the
+    balancer never sheds them. An importance staged in the settings but not
+    saved yet stands in for the stored one.
     """
-    appliances = [
-        (subentry.title, dict(subentry.data))
+    staged = [
+        {
+            **subentry.data,
+            CONF_IMPORTANCE: importances.get(
+                subentry.subentry_id, importance_of(subentry.data)
+            ),
+            "_subentry": subentry,
+        }
         for subentry in entry.subentries.values()
         if subentry.subentry_type == SUBENTRY_APPLIANCE
     ]
-    balanced = [
-        {**data, "_title": title}
-        for title, data in appliances
-        if data.get(CONF_BALANCING_ENABLED, True)
-    ]
-    left_out = [
-        {**data, "_title": title}
-        for title, data in appliances
-        if not data.get(CONF_BALANCING_ENABLED, True)
-    ]
-    rows = [
-        f"| {rank} | {_table_cell(data['_title'])} | {importance_of(data):g} |"
+    balanced = [data for data in staged if data.get(CONF_BALANCING_ENABLED, True)]
+    left_out = [data for data in staged if not data.get(CONF_BALANCING_ENABLED, True)]
+    ranked: list[tuple[int | None, ConfigSubentry, float]] = [
+        (rank, data["_subentry"], importance_of(data))
         for rank, data in enumerate(shed_order(balanced), start=1)
     ]
-    rows += [
-        f"| - | {_table_cell(data['_title'])} | {importance_of(data):g} |"
-        for data in left_out
+    ranked += [(None, data["_subentry"], importance_of(data)) for data in left_out]
+    return ranked
+
+
+def _appliance_rows(
+    entry: ConfigEntry, importances: Mapping[str, float] | None = None
+) -> str:
+    """
+    Return the appliance table's rows; the header lives in the translation.
+
+    An appliance whose balancing is off shows a dash for its rank.
+    """
+    rows = [
+        f"| {rank if rank is not None else '-'} "
+        f"| {_table_cell(subentry.title)} | {importance:g} |"
+        for rank, subentry, importance in _appliances_in_shed_order(
+            entry, importances or {}
+        )
     ]
     return "\n".join(rows) or "| - | - | - |"
+
+
+def _importance_fields(
+    entry: ConfigEntry, importances: Mapping[str, float]
+) -> dict[str, str]:
+    """
+    Return one form field per appliance, label to subentry id, in shed order.
+
+    The label is the appliance's title, which Home Assistant shows as is
+    because no translation names it (as the variable budget's state fields
+    are shown). Two appliances with the same title get a number after it.
+    """
+    fields: dict[str, str] = {}
+    for _rank, subentry, _importance in _appliances_in_shed_order(entry, importances):
+        label = subentry.title or subentry.subentry_id
+        count = 2
+        while label in fields:
+            label = f"{subentry.title} ({count})"
+            count += 1
+        fields[label] = subentry.subentry_id
+    return fields
+
+
+def _write_with_one_reload(
+    hass: HomeAssistant, entry: ConfigEntry, writes: list[Callable[[], bool]]
+) -> None:
+    """
+    Apply several writes to the entry and its subentries, then reload once.
+
+    Every write that changes something calls the entry's update listener,
+    which reloads the balancer (about 20 s on a busy host), so four changed
+    importances reloaded it four times. Each write is let through without a
+    reload instead, and one reload follows when anything changed. Core runs
+    the listener as an eager task inside the write, so each armed skip is
+    consumed by its own write; one whose write changed nothing is disarmed.
+    """
+    balancer = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    changed = False
+    for write in writes:
+        if balancer is not None:
+            balancer.skip_next_reload()
+        if write():
+            changed = True
+        elif balancer is not None:
+            balancer.cancel_skip_reload()
+    if changed:
+        hass.config_entries.async_schedule_reload(entry.entry_id)
 
 
 def _get_power_sensor_selector() -> EntitySelector:
@@ -1010,6 +1075,9 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
             **config_entry.options,
         }
         self._config_data: dict[str, Any] = deepcopy(dict(data_source))
+        # Importances changed in the shed order table, by subentry id. Held
+        # here like every other setting in this flow and written on Save.
+        self._importances: dict[str, int] = {}
 
     async def async_step_init(
         self, _user_input: dict[str, Any] | None = None
@@ -1017,9 +1085,10 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
         """
         Show the settings menu.
 
-        Appliances are edited elsewhere: each is a subentry with its own edit
-        and delete on the integration page, and its own balancing switch.
-        The menu only lists them, in the order the balancer sheds them.
+        Appliances are added, edited and deleted elsewhere: each is a
+        subentry with its own row on the integration page, and its own
+        balancing switch. Here they are listed in shed order, and only their
+        importance can be changed, to reorder them side by side.
         """
         return self.async_show_menu(
             step_id="init",
@@ -1035,18 +1104,48 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """
-        Show every appliance in the order the balancer sheds it.
+        Show every appliance in shed order, each with its importance slider.
 
-        Read only: an appliance's importance is edited from its own row on
-        the integration page. Submitting goes back to the menu.
+        A submit that moved a slider shows the table again in the new order,
+        so the reordering can be checked before it is kept; a submit with
+        nothing moved goes back to the menu. Nothing is written until Save.
         """
+        entry = self._config_entry
+        fields = _importance_fields(entry, self._importances)
         if user_input is not None:
-            return await self.async_step_init()
+            moved = False
+            for label, subentry_id in fields.items():
+                value = user_input.get(label)
+                if not isinstance(value, (int, float)):
+                    continue
+                current = self._importances.get(
+                    subentry_id, importance_of(entry.subentries[subentry_id].data)
+                )
+                if int(value) != current:
+                    self._importances[subentry_id] = int(value)
+                    moved = True
+            if not moved:
+                return await self.async_step_init()
+            fields = _importance_fields(entry, self._importances)
+
+        schema = {
+            vol.Required(
+                label,
+                default=int(
+                    self._importances.get(
+                        subentry_id, importance_of(entry.subentries[subentry_id].data)
+                    )
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
+            )
+            for label, subentry_id in fields.items()
+        }
         return self.async_show_form(
             step_id="appliances",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema(schema),
             description_placeholders={
-                "rows": _appliance_rows(self._config_entry),
+                "rows": _appliance_rows(entry, self._importances),
             },
         )
 
@@ -1057,13 +1156,33 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
         Save the settings.
 
         The configuration lives in data alone (see async_migrate_entry);
-        options stay empty. One update, one reload.
+        options stay empty. Changed importances go to their subentries in the
+        same save, and the whole save reloads the balancer once.
         """
-        self.hass.config_entries.async_update_entry(
-            self._config_entry,
-            data=deepcopy(self._config_data),
-            options={},
+        entry = self._config_entry
+        manager = self.hass.config_entries
+        writes: list[Callable[[], bool]] = []
+        for subentry_id, importance in self._importances.items():
+            subentry = entry.subentries.get(subentry_id)
+            if subentry is None or importance_of(subentry.data) == importance:
+                continue
+            writes.append(
+                partial(
+                    manager.async_update_subentry,
+                    entry,
+                    subentry,
+                    data={**subentry.data, CONF_IMPORTANCE: importance},
+                )
+            )
+        writes.append(
+            partial(
+                manager.async_update_entry,
+                entry,
+                data=deepcopy(self._config_data),
+                options={},
+            )
         )
+        _write_with_one_reload(self.hass, entry, writes)
         return self.async_create_entry(title="", data={})
 
     async def async_step_edit_notifications(

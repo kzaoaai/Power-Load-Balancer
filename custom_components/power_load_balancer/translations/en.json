@@ -135,7 +135,7 @@
       },
       "appliances": {
         "title": "Appliances and shed order",
-        "description": "The balancer sheds appliances from the top of this table down and restores them from the bottom up, so the most important comes back first. Lower importance is shed first; equal importance keeps the order the appliances were added in. A dash marks an appliance whose balancing is switched off: the balancer never sheds it. To change an importance, edit the appliance from its row on the integration page.\n\n| Shed order | Appliance | Importance |\n|:-:|:--|:-:|\n{rows}"
+        "description": "The balancer sheds appliances from the top of this table down and restores them from the bottom up, so the most important comes back first. Lower importance is shed first; equal importance keeps the order the appliances were added in. A dash marks an appliance whose balancing is switched off: the balancer never sheds it.\n\n| Shed order | Appliance | Importance |\n|:-:|:--|:-:|\n{rows}\n\nMove a slider and submit to see the new order; submit with nothing moved to go back. Nothing is saved until you choose **Save**, which applies every change with a single reload."
       },
       "budget_states": {
         "title": "Variable budget",

@@ -79,7 +79,7 @@ After installation (and a restart if requested):
     *   its **Importance**: the lowest is shed first and restored last, 10 is kept on longest; equal importance keeps the order the appliances were added in;
     *   its **Power draw**: learned from its sensor (the default) or a fixed value;
     *   optionally a name and its own cooldown.
-6.  Each appliance's row has edit and delete; notifications and the main settings are under **Configure** on the balancer itself, where **Appliances and shed order** also lists every appliance in the order it is shed, with its importance.
+6.  Each appliance's row has edit and delete; notifications and the main settings are under **Configure** on the balancer itself, where **Appliances and shed order** lists every appliance in the order it is shed, with an importance slider for each: move them to reorder the appliances side by side, and **Save** applies every change with a single reload.
 
 Upgrading from 1.x moves the configured appliances into subentries automatically, all with balancing on. The move is one-way: going back to a 1.x release afterwards finds no appliances.
 
