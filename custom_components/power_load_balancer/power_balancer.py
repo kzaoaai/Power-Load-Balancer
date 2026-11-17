@@ -1864,6 +1864,7 @@ class PowerLoadBalancer:
             restore_spacing_remaining=(
                 self._appliance_controller.restore_spacing_remaining
             ),
+            begin_restore=self._appliance_controller.begin_restore,
         )
 
         self._balancing_engine.balance_up(
@@ -1898,6 +1899,8 @@ class PowerLoadBalancer:
         except BaseException:
             self._appliance_controller.forget_own_restore(entity_id)
             raise
+        finally:
+            self._appliance_controller.end_restore(entity_id)
         if not restored:
             # Nothing could turn it back on (a climate with no usable HVAC
             # mode, say). Forgetting it would leave it off for good; keep

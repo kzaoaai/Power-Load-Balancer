@@ -101,6 +101,7 @@ class ApplianceController:
         self._previous_operation_modes: dict[str, str] = {}
         self._own_restores: dict[str, float] = {}
         self._settling: dict[str, dict[str, float]] = {}
+        self._restores_in_flight: dict[str, float] = {}
         self.learner = DrawLearner()
         self.power_of: Callable[[str], float] = lambda _entity_id: 0.0
         self._last_restore_at: float | None = None
@@ -246,6 +247,23 @@ class ApplianceController:
         """Return why and when an appliance was shed, if it is held off."""
         return self._balanced_off_appliances.get(entity_id)
 
+    def begin_restore(self, entity_id: str, expected_power: float) -> None:
+        """
+        Record a restore whose turn-on has been sent but not yet answered.
+
+        Called before the turn-on is awaited, never after. The call can take
+        seconds (a cloud device, a tank whose release switches a relay), and
+        a meter reading that lands meanwhile used to find no restore under
+        way: it restored the same appliance again, or the next one, sized
+        without the first one's draw. While one is in flight no other restore
+        starts, and its expected draw is held back from the headroom.
+        """
+        self._restores_in_flight[entity_id] = max(float(expected_power), 0.0)
+
+    def end_restore(self, entity_id: str) -> None:
+        """Drop the in-flight record of a restore, whether it landed or not."""
+        self._restores_in_flight.pop(entity_id, None)
+
     def note_restore_settling(self, entity_id: str, expected_power: float) -> None:
         """
         Record a restore that has landed but may not be drawing yet.
@@ -267,10 +285,15 @@ class ApplianceController:
 
         A hold ends when the appliance's sensor reads at least half of what it
         was expected to draw (its draw is in the meter now), or after
-        RESTORE_SETTLE_SECONDS, whichever comes first.
+        RESTORE_SETTLE_SECONDS, whichever comes first. A restore still in
+        flight counts in full: its turn-on has not even been answered.
         """
         now = monotonic()
-        total = 0.0
+        total = sum(
+            watts
+            for entity_id, watts in self._restores_in_flight.items()
+            if entity_id not in self._settling
+        )
         for entity_id, hold in list(self._settling.items()):
             watts = hold["watts"]
             expired = now - hold["since"] >= RESTORE_SETTLE_SECONDS
@@ -284,13 +307,22 @@ class ApplianceController:
         return total
 
     def restore_spacing_remaining(self) -> float:
-        """Return how long until the next restore may start, in seconds."""
+        """
+        Return how long until the next restore may start, in seconds.
+
+        A restore in flight blocks for the full spacing: the spacing counts
+        from when it lands, and it has not landed yet.
+        """
+        if self._restores_in_flight:
+            return float(RESTORE_SPACING_SECONDS)
         if self._last_restore_at is None:
             return 0.0
         return max(0.0, RESTORE_SPACING_SECONDS - (monotonic() - self._last_restore_at))
 
     def last_restored(self) -> str | None:
         """Return the appliance restored most recently, while it settles."""
+        if self._restores_in_flight:
+            return next(reversed(self._restores_in_flight))
         if not self._settling:
             return None
         return max(self._settling, key=lambda e: self._settling[e]["since"])
@@ -1050,19 +1082,18 @@ class ApplianceController:
                         "Auto turning on appliance after delay",
                         entity_id=entity_to_restore,
                     )
-                    self.note_own_restore(entity_to_restore)
-                    try:
-                        await self.turn_on_appliance_service(
-                            entity_to_restore,
-                            f"Automatic restoration after {delay_seconds}s "
-                            "power budget timeout",
+                    restored = await self._turn_on_from_timer(
+                        entity_to_restore,
+                        expected_power_value,
+                        f"Automatic restoration after {delay_seconds}s "
+                        "power budget timeout",
+                    )
+                    if not restored:
+                        logger.debug(
+                            "Auto turn-on found no way to turn it on",
+                            entity_id=entity_to_restore,
                         )
-                    except BaseException:
-                        self.forget_own_restore(entity_to_restore)
-                        raise
-
-                    self.note_restore_settling(entity_to_restore, expected_power_value)
-                    self._expected_power_restoration.pop(entity_to_restore, None)
+                        return
                     logger.debug(
                         "Auto turn-on completed successfully",
                         entity_id=entity_to_restore,
@@ -1092,6 +1123,37 @@ class ApplianceController:
 
         except Exception:
             logger.exception("Failed to schedule auto turn-on", entity_id=entity_id)
+
+    async def _turn_on_from_timer(
+        self, entity_id: str, expected_power: float, reason: str
+    ) -> bool:
+        """
+        Turn a held appliance back on for its cooldown timer.
+
+        The same bookkeeping as a restore chosen on a meter reading: it is
+        claimed before the call is sent, and one that turned nothing on keeps
+        the appliance held, with its size, for another cooldown. Recording a
+        restore that never happened held headroom and spaced out the other
+        restores for nothing.
+
+        Returns True when the appliance came back on.
+        """
+        self.note_own_restore(entity_id)
+        self.begin_restore(entity_id, expected_power)
+        try:
+            restored = await self.turn_on_appliance_service(entity_id, reason)
+        except BaseException:
+            self.forget_own_restore(entity_id)
+            raise
+        finally:
+            self.end_restore(entity_id)
+        if not restored:
+            self.forget_own_restore(entity_id)
+            self.restart_cooldown(entity_id)
+            return False
+        self.note_restore_settling(entity_id, expected_power)
+        self._expected_power_restoration.pop(entity_id, None)
+        return True
 
     def _prepare_turn_off_service(
         self,
@@ -1543,6 +1605,7 @@ class ApplianceController:
         self._previous_operation_modes.clear()
         self._own_restores.clear()
         self._settling.clear()
+        self._restores_in_flight.clear()
         self._last_restore_at = None
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
@@ -1568,4 +1631,5 @@ class ApplianceController:
                 }
                 for entity_id, hold in self._settling.items()
             },
+            "restores_in_flight_watt": dict(self._restores_in_flight),
         }

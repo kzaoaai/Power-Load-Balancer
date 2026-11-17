@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (160 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (170 tests). It needs `.venv` on Python
   3.14, built from `requirements_test.txt` as `AGENTS.md` describes (harness
   0.13.375 = HA 2026.10.4; the 3.12 / HA 2025.1 harness had no subentries).
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 24
@@ -61,7 +61,7 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: **v2.1.1**. Release notes on GitHub carry the per-version
+- Latest release: **v2.1.2**. Release notes on GitHub carry the per-version
   history; what follows is the shape of the code now.
 - **Appliances are config subentries** of type `appliance` (unique id = the
   appliance entity; data = the per-appliance dict plus `balancing_enabled`).
@@ -90,7 +90,12 @@ Production installs the fork through the Home Assistant Marketplace
   clears the map. Lower budget applies at once, higher after the delay.
 - **Shedding/restoring**: sheds persist across restarts in a per-entry
   Store; restores go most important first, 30 s apart, with a 2% margin and
-  the restored draw reserved until its sensor shows it (max 150 s). Draw is
+  the restored draw reserved until its sensor shows it (max 150 s). A
+  restore is claimed (`begin_restore`) before its turn-on is sent and
+  released when the call returns; while one is in flight no other restore
+  starts, on the meter path or the cooldown timer, and its draw is held
+  back. Without that, a reading landing mid-call restored the same
+  appliance twice or two at once. Draw is
   learned (95th percentile of the last 500 running readings >= 50 W, used
   from 20) or fixed per appliance; no `power_draw_mode` means fixed when a
   nameplate is set. Balancing pauses while the meter is silent 5 minutes.

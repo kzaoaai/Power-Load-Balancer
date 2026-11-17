@@ -44,6 +44,7 @@ class BalancingCallbacks:
     is_appliance_shed: Callable[[str], bool]
     get_settling_power: Callable[[], float]
     restore_spacing_remaining: Callable[[], float]
+    begin_restore: Callable[[str, float], None]
 
 
 class BalancingEngine:
@@ -208,6 +209,11 @@ class BalancingEngine:
                 )
 
                 callbacks.cancel_scheduled_turn_on(appliance_entity_id)
+                # Claimed before the turn-on is sent. The call can take
+                # seconds, and a reading that landed meanwhile found no
+                # restore under way: it sent the same appliance again, or
+                # the next one, sized without the first one's draw.
+                callbacks.begin_restore(appliance_entity_id, expected_power)
 
                 async def restore_task(
                     appliance_entity_id: str = appliance_entity_id,

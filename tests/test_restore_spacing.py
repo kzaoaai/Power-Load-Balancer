@@ -10,8 +10,11 @@ second tank was sized against power the first was about to take.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
+import pytest
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
@@ -20,6 +23,7 @@ from tests.conftest import (
     DOWNSTAIRS,
     DOWNSTAIRS_POWER,
     HEATER,
+    MAIN_SENSOR,
     TANK_VA,
     UPSTAIRS,
     UPSTAIRS_POWER,
@@ -27,6 +31,9 @@ from tests.conftest import (
     hold,
     ladder,
 )
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant, ServiceCall
 
 PENDING = "sensor.power_load_balancer_pending_actions"
 LOG_SENSOR = "sensor.power_load_balancer_log"
@@ -175,3 +182,128 @@ async def test_the_cooldown_timer_respects_spacing_and_the_hold(
     await _timer_restore(hass, controller, 1500)
     assert _restored()
     assert HEATER in controller.get_diagnostics_snapshot()["settling_restores"]
+
+
+def _a_reading_mid_call(hass: HomeAssistant) -> None:
+    """Publish one meter reading from inside a turn-on call."""
+    hass.states.async_set(
+        MAIN_SENSOR,
+        "1003",
+        {"unit_of_measurement": "VA", "device_class": "apparent_power"},
+    )
+
+
+def _release_seeing_a_reading(
+    hass: HomeAssistant, world, *, confirmed_first: bool
+) -> None:
+    """
+    Make the first release slow enough for a meter reading to land in it.
+
+    A cloud device or a relay answers a turn-on in seconds, against a meter
+    that reports every five to ten. The reading lands either before the tank
+    reports itself released or after; each used to start a second restore
+    while the first was still in flight.
+    """
+    seen = {"reading": False}
+
+    async def _release(call: ServiceCall) -> None:
+        entity_ids = call.data["entity_id"]
+        for entity_id in [entity_ids] if isinstance(entity_ids, str) else entity_ids:
+            world.calls.append(("generic_water_heater", "release", entity_id))
+            state = hass.states.get(entity_id)
+            attributes = {**state.attributes, "load_shed": False}
+            if confirmed_first:
+                hass.states.async_set(entity_id, state.state, attributes)
+            if not seen["reading"]:
+                seen["reading"] = True
+                _a_reading_mid_call(hass)
+                for _ in range(20):
+                    await asyncio.sleep(0)
+            if not confirmed_first:
+                hass.states.async_set(entity_id, state.state, attributes)
+
+    hass.services.async_register("generic_water_heater", "release", _release)
+
+
+@pytest.mark.parametrize(
+    "confirmed_first", [False, True], ids=["before_confirm", "after_confirm"]
+)
+async def test_a_reading_during_a_restore_call_starts_no_second_restore(  # noqa: PLR0913, PLR0917
+    hass, world, clock, setup_balancer, register_shed_platform, confirmed_first
+):
+    """Before: the same tank sent twice, or both tanks back at once."""
+    register_shed_platform(UPSTAIRS, DOWNSTAIRS)
+    await setup_balancer()
+    await hold(hass, 1000, 10, clock)
+    await _both_tanks_shed(hass, world, clock)
+    _release_seeing_a_reading(hass, world, confirmed_first=confirmed_first)
+
+    await hold(hass, 1000, 20, clock)
+    assert _releases(world) == [DOWNSTAIRS], _releases(world)
+
+    # Once the first has landed, the spacing runs as before.
+    await hold(hass, 1000, 20, clock)
+    assert _releases(world) == [DOWNSTAIRS, UPSTAIRS], _releases(world)
+
+
+async def test_a_reading_during_a_timer_restore_starts_no_second_restore(  # noqa: PLR0913, PLR0917
+    hass, world, clock, setup_balancer, register_shed_platform, monkeypatch
+):
+    """The cooldown timer's restore holds the meter's back while in flight."""
+    register_shed_platform(UPSTAIRS, DOWNSTAIRS)
+    entry = await setup_balancer(power_sensors=ladder(include_heater=True))
+    controller = balancer_of(hass, entry)._appliance_controller
+    await hold(hass, 1000, 10, clock)
+    await _both_tanks_shed(hass, world, clock)
+
+    turn_on = controller.turn_on_appliance_service
+    seen = {"reading": False}
+
+    async def _slow_turn_on(entity_id: str, reason: str | None = None) -> bool:
+        if not seen["reading"]:
+            seen["reading"] = True
+            _a_reading_mid_call(hass)
+            for _ in range(20):
+                await asyncio.sleep(0)
+        return await turn_on(entity_id, reason)
+
+    monkeypatch.setattr(controller, "turn_on_appliance_service", _slow_turn_on)
+    await _timer_restore(hass, controller, 1000)
+    # The timer is a background task, and the slow call outlives the plain
+    # wait inside the helper.
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    # Home Assistant's own switch service replaces the recorder's once the
+    # balancer's switch platform loads, so the heater shows in the log only.
+    log = hass.states.get(LOG_SENSOR).attributes["events"]
+    assert any(f"Turned on {HEATER}" in line for line in log), log
+    assert _releases(world) == [], _releases(world)
+
+
+async def test_a_timer_restore_that_could_do_nothing_holds_no_headroom(
+    hass, world, clock, setup_balancer, monkeypatch
+):
+    """Nothing came on: no hold, no spacing, its size kept, another cooldown."""
+    entry = await setup_balancer(power_sensors=ladder(include_heater=True))
+    controller = balancer_of(hass, entry)._appliance_controller
+
+    async def _could_not(entity_id: str, reason: str | None = None) -> bool:
+        return False
+
+    monkeypatch.setattr(controller, "turn_on_appliance_service", _could_not)
+    controller.mark_appliance_balanced_off(HEATER, "test shed")
+    controller.schedule_auto_turn_on(HEATER, 1000, lambda: 3000.0, lambda: ARM_LEVEL)
+    await clock.advance(121)
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=121), fire_all=True
+    )
+    await hass.async_block_till_done()
+
+    snapshot = controller.get_diagnostics_snapshot()
+    assert HEATER not in snapshot["settling_restores"], snapshot
+    assert snapshot["restores_in_flight_watt"] == {}, snapshot
+    assert controller.restore_spacing_remaining() == 0
+    assert HEATER in controller.get_balanced_off_appliances()
+    assert controller.get_balanced_off_age(HEATER) == 0, "cooldown not restarted"
+    assert controller.get_expected_power_restoration(HEATER) == 1000
+    assert HEATER not in controller._own_restores

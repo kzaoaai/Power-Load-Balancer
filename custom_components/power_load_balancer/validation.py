@@ -141,15 +141,21 @@ def convert_power_to_watts(power: float, state: State) -> float:
         Power value in watts (or volt-amperes for apparent power sensors).
 
     """
-    unit_raw = state.attributes.get("unit_of_measurement", "W")
+    # An attribute present but null is None, not the default.
+    unit_raw = str(state.attributes.get("unit_of_measurement") or "W")
+    # Milli and mega differ only in case, so these two are matched exactly.
+    # A lowercase "mw" could be either and is reported as unknown below,
+    # rather than read as megawatts and scaled a billion times too high.
     if unit_raw in ("mW", "mVA"):
         return power / 1000
+    if unit_raw == "MW":
+        return power * 1000000
 
     factors = {
         0.001: ("milliwatt", "milliwatts", "millivolt-ampere"),
         1: ("w", "watt", "watts", "va", "volt-ampere", "voltampere"),
         1000: ("kw", "kilowatt", "kilowatts", "kva", "kilovolt-ampere"),
-        1000000: ("mw", "megawatt", "megawatts"),
+        1000000: ("megawatt", "megawatts"),
         1000000000: ("gw", "gigawatt", "gigawatts"),
     }
     unit = unit_raw.lower()

@@ -5,25 +5,38 @@ Each test pins one fix from the November 2026 review: an appliance that only
 reappeared being vetoed, a tank shed one way and restored another, a restore
 that did nothing being forgotten, a NaN meter reading, a log message too long
 for a state, a Repairs notice nothing ever withdrew, a meter gone silent, and a
-timer restore that cancelled itself.
+timer restore that cancelled itself. A second review added a null or
+ambiguous power unit and a timeout reported as a plain failure.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
+from homeassistant.core import State
 from homeassistant.helpers import issue_registry as ir
 
-from custom_components.power_load_balancer import power_balancer
+from custom_components.power_load_balancer import power_balancer, service
 from custom_components.power_load_balancer.const import (
     DOMAIN,
     appliance_control_issue_id,
 )
-from custom_components.power_load_balancer.exceptions import PowerSensorError
-from custom_components.power_load_balancer.validation import validate_power_value
+from custom_components.power_load_balancer.exceptions import (
+    PowerSensorError,
+    ServiceTimeoutError,
+)
+from custom_components.power_load_balancer.service import (
+    ServiceCallParams,
+    safe_service_call,
+)
+from custom_components.power_load_balancer.validation import (
+    convert_power_to_watts,
+    validate_power_value,
+)
 from tests.conftest import (
     ARM_LEVEL,
     DOWNSTAIRS,
@@ -229,3 +242,37 @@ async def test_a_timer_restore_does_not_cancel_itself(
         assert task.cancelled() is expect_cancelled, (own, task)
         task.cancel()
         controller._scheduled_auto_turn_ons.pop(UPSTAIRS, None)
+
+
+@pytest.mark.parametrize(
+    ("unit", "expected"),
+    [
+        (None, 500.0),
+        ("mW", 0.5),
+        ("MW", 500_000_000.0),
+        ("mw", 500.0),
+        ("kVA", 500_000.0),
+    ],
+)
+def test_a_power_unit_is_read_by_its_exact_prefix(
+    unit: str | None, expected: float
+) -> None:
+    """A null unit is watts; milli and mega differ by case alone."""
+    state = State("sensor.meter", "500", {"unit_of_measurement": unit})
+    assert convert_power_to_watts(500.0, state) == expected
+
+
+async def test_a_service_call_that_times_out_raises_its_own_error(
+    hass, monkeypatch
+) -> None:
+    """The timeout used to be caught again and re-raised as a plain failure."""
+
+    async def _times_out(awaitable, **_options: float) -> None:
+        awaitable.close()
+        raise TimeoutError
+
+    monkeypatch.setattr(service, "asyncio", SimpleNamespace(wait_for=_times_out))
+    with pytest.raises(ServiceTimeoutError):
+        await safe_service_call(
+            ServiceCallParams(hass=hass, domain="switch", service="turn_on")
+        )

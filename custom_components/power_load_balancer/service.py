@@ -63,41 +63,38 @@ async def safe_service_call(params: ServiceCallParams) -> None:
     service_data = params.service_data or {}
     timeout: float = 10.0
 
+    logger.debug(
+        "Calling service",
+        domain=params.domain,
+        service=params.service,
+        service_data=service_data,
+        timeout=timeout,
+    )
+
+    # One try with sibling handlers: a ServiceTimeoutError is itself a
+    # HomeAssistantError, so raising it inside an inner try let the outer
+    # handler below catch it and wrap it as a plain ServiceCallError.
     try:
-        logger.debug(
-            "Calling service",
-            domain=params.domain,
-            service=params.service,
-            service_data=service_data,
+        await asyncio.wait_for(
+            params.hass.services.async_call(
+                params.domain, params.service, service_data, blocking=True
+            ),
             timeout=timeout,
         )
 
-        try:
-            await asyncio.wait_for(
-                params.hass.services.async_call(
-                    params.domain, params.service, service_data, blocking=True
-                ),
-                timeout=timeout,
-            )
-        except TimeoutError as exc:
-            raise ServiceTimeoutError(
-                message=(
-                    f"Service call {params.domain}.{params.service} timed out after "
-                    f"{timeout}s"
-                ),
-                details={
-                    "domain": params.domain,
-                    "service": params.service,
-                    "service_data": service_data,
-                    "timeout": timeout,
-                },
-            ) from exc
-
-        logger.debug(
-            "Service call completed successfully",
-            domain=params.domain,
-            service=params.service,
-        )
+    except TimeoutError as exc:
+        raise ServiceTimeoutError(
+            message=(
+                f"Service call {params.domain}.{params.service} timed out after "
+                f"{timeout}s"
+            ),
+            details={
+                "domain": params.domain,
+                "service": params.service,
+                "service_data": service_data,
+                "timeout": timeout,
+            },
+        ) from exc
 
     except HomeAssistantError as exc:
         raise ServiceCallError(
@@ -123,3 +120,9 @@ async def safe_service_call(params: ServiceCallParams) -> None:
                 "error": str(exc),
             },
         ) from exc
+
+    logger.debug(
+        "Service call completed successfully",
+        domain=params.domain,
+        service=params.service,
+    )
