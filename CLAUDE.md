@@ -22,7 +22,7 @@
 
 ## Test and lint
 
-- `./scripts/test` runs the suite (170 tests). It needs `.venv` on Python
+- `./scripts/test` runs the suite (172 tests). It needs `.venv` on Python
   3.14, built from `requirements_test.txt` as `AGENTS.md` describes (harness
   0.13.375 = HA 2026.10.4; the 3.12 / HA 2025.1 harness had no subentries).
 - `uvx ruff@<version pinned in requirements.txt> check .` reports 24
@@ -61,7 +61,7 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: **v2.1.2**. Release notes on GitHub carry the per-version
+- Latest release: **v2.1.3**. Release notes on GitHub carry the per-version
   history; what follows is the shape of the code now.
 - **Appliances are config subentries** of type `appliance` (unique id = the
   appliance entity; data = the per-appliance dict plus `balancing_enabled`).
@@ -99,7 +99,14 @@ Production installs the fork through the Home Assistant Marketplace
   learned (95th percentile of the last 500 running readings >= 50 W, used
   from 20) or fixed per appliance; no `power_draw_mode` means fixed when a
   nameplate is set. Balancing pauses while the meter is silent 5 minutes.
-- Options flow: native menu (main settings, notifications, save).
+- Options flow: native menu (main settings, notifications, appliances and
+  shed order, save). The appliances step is a read-only Markdown table
+  built by `_appliance_rows` from `shed_order` in `balancing_engine.py`,
+  the ladder's own sort, so it cannot disagree with what is shed; the
+  table header lives in the translations, only the rows are a placeholder.
+- Importance alone orders the ladder: 1 is shed first and restored last.
+  Upstream's "last resort" flag was removed in v2.1.3 (it never shed
+  anything, contrary to its label); a stored `last_resort` key is ignored.
   Configuration lives in `entry.data` only; never reintroduce a copy in
   `options`.
 - CI: `validate.yml` (hassfest, HACS) and `tests.yml` (ruff format check,

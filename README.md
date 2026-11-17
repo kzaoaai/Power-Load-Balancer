@@ -11,7 +11,6 @@ A Home Assistant custom integration to prevent exceeding your household's power 
 -   **Per-appliance entities on the appliance's own device**: a **PLB enable** switch, and two diagnostic entities: a **PLB learned draw** sensor and a **PLB shed** indicator (with why and since when). The PLB prefix tells them apart from the appliance's own entities. They appear on the device page of the appliance itself (the water heater, the smart plug); an appliance with no device falls back to the device of its power sensor, and failing that the entities are named after the appliance.
 -   **Seasonal appliances**: switch an appliance's **PLB enable** off and it is not watched, shed, restored or learned, and raises no repairs; its settings and learned draw are kept. One the balancer is holding off is given back first. The switch can be flipped from a dashboard or an automation.
 -   Prioritize which appliances to turn off based on configured importance levels.
--   Flag certain appliances as "last resort" to only turn them off if absolutely necessary.
 -   Optional "assumed power on" value for appliances to react quickly to potential overloads before sensor data updates.
 -   Provides a control switch entity to easily enable or disable the load balancing function.
 -   Includes a sensor entity to log balancing events (e.g., which appliance was turned off and why).
@@ -77,10 +76,10 @@ After installation (and a restart if requested):
 4.  Choose the **Main Power Sensor** (the total house consumption) and the **Power budget**, fixed or following another entity, set slightly below your actual limit. Optionally adjust the cooldown and sustained-load settings.
 5.  On the integration page, select **Add appliance** for each appliance the balancer may switch off:
     *   the **Power Sensor** that measures it, and the **Controllable Appliance** (switch, light, climate, water_heater or media_player);
-    *   its **Importance** (1 = keep on longest, 10 = shed first) and whether it is a **Last Resort**;
+    *   its **Importance**: the lowest is shed first and restored last, 10 is kept on longest; equal importance keeps the order the appliances were added in;
     *   its **Power draw**: learned from its sensor (the default) or a fixed value;
     *   optionally a name and its own cooldown.
-6.  Each appliance's row has edit and delete; notifications and the main settings are under **Configure** on the balancer itself.
+6.  Each appliance's row has edit and delete; notifications and the main settings are under **Configure** on the balancer itself, where **Appliances and shed order** also lists every appliance in the order it is shed, with its importance.
 
 Upgrading from 1.x moves the configured appliances into subentries automatically, all with balancing on. The move is one-way: going back to a 1.x release afterwards finds no appliances.
 
@@ -110,7 +109,6 @@ These services provide enhanced logging in Home Assistant's logbook and logs, ma
 -   **Appliance Not Turning Off:**
     *   Verify the correct controllable appliance entity is selected in the configuration.
     *   Check if the appliance was already turned off by the balancer (it won't try to turn it off again).
-    *   Ensure the appliance is not marked as "Last Resort" if other, higher importance appliances are still on.
 
 ## Contributing
 

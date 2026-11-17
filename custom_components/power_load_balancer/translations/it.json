@@ -54,14 +54,14 @@
             "entity_id": "Sensore di potenza monitorato",
             "name": "Nome personalizzato (opzionale)",
             "importance": "Importanza (1=Bassa, 10=Alta)",
-            "last_resort": "Ultima risorsa (spegni solo se assolutamente necessario)",
             "appliance": "Elettrodomestico controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
             "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
             "power_draw_mode": "Assorbimento",
             "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
           },
           "data_description": {
-            "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
+            "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto.",
+            "importance": "Il valore più basso viene spento per primo e riacceso per ultimo; 10 resta acceso più a lungo."
           }
         },
         "reconfigure": {
@@ -71,14 +71,14 @@
             "entity_id": "Sensore di potenza monitorato",
             "name": "Nome personalizzato (opzionale)",
             "importance": "Importanza (1=Bassa, 10=Alta)",
-            "last_resort": "Ultima scelta (spegni solo se assolutamente necessario)",
             "appliance": "Dispositivo controllabile (Interruttore, Luce, Clima, Scaldacqua o Lettore Multimediale)",
             "device_cooldown": "Override tempo di raffreddamento dispositivo (secondi, lascia -1 per predefinito)",
             "power_draw_mode": "Assorbimento",
             "nominal_power_watt": "Assorbimento fisso (W, usato quando l'assorbimento è fisso)"
           },
           "data_description": {
-            "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto."
+            "power_draw_mode": "Come il bilanciatore stima questo apparecchio quando il sensore non può dirlo, per esempio mentre è spento. L'apprendimento usa ciò che il sensore ha misurato mentre l'apparecchio funzionava; finché le letture non bastano l'assorbimento resta sconosciuto.",
+            "importance": "Il valore più basso viene spento per primo e riacceso per ultimo; 10 resta acceso più a lungo."
           }
         }
       },
@@ -101,6 +101,7 @@
         "menu_options": {
           "edit_main_sensor": "Impostazioni principali",
           "edit_notifications": "Notifiche",
+          "appliances": "Apparecchi e ordine di distacco",
           "finish": "Salva"
         }
       },
@@ -131,6 +132,10 @@
           "notify_channel_budget": "Il budget di potenza è cambiato",
           "notify_channel_problem": "Qualcosa richiede attenzione"
         }
+      },
+      "appliances": {
+        "title": "Apparecchi e ordine di distacco",
+        "description": "Il bilanciatore spegne gli apparecchi dall'alto verso il basso di questa tabella e li riaccende dal basso verso l'alto, così il più importante torna per primo. Si spegne prima chi ha l'importanza più bassa; a parità di importanza vale l'ordine in cui gli apparecchi sono stati aggiunti. Un trattino indica un apparecchio con il bilanciamento disattivato: il bilanciatore non lo spegne mai. Per cambiare un'importanza, modifica l'apparecchio dalla sua riga nella pagina dell'integrazione.\n\n| Ordine | Apparecchio | Importanza |\n|:-:|:--|:-:|\n{rows}"
       },
       "budget_states": {
         "title": "Budget variabile",

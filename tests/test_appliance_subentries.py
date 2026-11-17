@@ -255,7 +255,6 @@ async def test_an_appliance_cannot_be_added_twice(hass, world, setup_balancer):
             "entity_id": UPSTAIRS_POWER,
             "appliance": UPSTAIRS,
             "importance": 4,
-            "last_resort": False,
         },
     )
     assert result["errors"] == {"appliance": "appliance_already_configured"}
@@ -280,7 +279,6 @@ async def test_editing_keeps_the_balancing_switch_where_it_was(
             "entity_id": UPSTAIRS_POWER,
             "appliance": UPSTAIRS,
             "importance": 5,
-            "last_resort": False,
         },
     )
     await hass.async_block_till_done()

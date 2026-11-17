@@ -16,18 +16,37 @@ from homeassistant.core import callback
 from .const import (
     CONF_APPLIANCE,
     CONF_IMPORTANCE,
-    CONF_LAST_RESORT,
+    DEFAULT_IMPORTANCE,
     NON_BINARY_ACTIVE_STATE_DOMAINS,
     RESTORE_MARGIN_FRACTION,
     RESTORE_UNKNOWN_SIZE_FRACTION,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
 
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def importance_of(sensor_config: dict[str, Any]) -> float:
+    """Return an appliance's importance; higher is kept on longer."""
+    try:
+        return float(sensor_config.get(CONF_IMPORTANCE, DEFAULT_IMPORTANCE))
+    except (TypeError, ValueError):
+        return float(DEFAULT_IMPORTANCE)
+
+
+def shed_order(sensor_configs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Return appliances in the order the balancer sheds them.
+
+    Least important first; equal importance keeps the configured order. The
+    restore order is this one reversed. Shared by the ladder and the table in
+    the settings, so what the settings show is what the balancer does.
+    """
+    return sorted(sensor_configs, key=importance_of)
 
 
 @dataclass
@@ -108,11 +127,8 @@ class BalancingEngine:
         """Return an appliance's configured importance; higher is kept longer."""
         for sensor_config in self._monitored_sensors:
             if sensor_config.get(CONF_APPLIANCE) == appliance_entity_id:
-                try:
-                    return float(sensor_config.get(CONF_IMPORTANCE, 5))
-                except (TypeError, ValueError):
-                    return 5.0
-        return 5.0
+                return importance_of(sensor_config)
+        return float(DEFAULT_IMPORTANCE)
 
     def balance_up(
         self,
@@ -246,14 +262,9 @@ class BalancingEngine:
         Shared with the pending-action report so what the balancer says it is
         about to do and what it would actually do cannot drift apart.
         """
-        sensors_to_consider = sorted(
-            self._monitored_sensors, key=lambda x: x.get(CONF_IMPORTANCE, 5)
-        )
-        for sensor_config in sensors_to_consider:
+        for sensor_config in shed_order(self._monitored_sensors):
             appliance_entity_id = sensor_config.get(CONF_APPLIANCE)
             if not appliance_entity_id:
-                continue
-            if sensor_config.get(CONF_LAST_RESORT, False):
                 continue
             appliance_state = self.hass.states.get(appliance_entity_id)
             if appliance_state is None:
@@ -379,13 +390,10 @@ class BalancingEngine:
             return True
 
         if self._reported_balance_down_failure:
-            _LOGGER.debug(
-                "Still unable to balance power using non-last-resort appliances"
-            )
+            _LOGGER.debug("Still no appliance left to shed")
         else:
             _LOGGER.warning(
-                "Could not balance power below budget by turning off non-last-resort "
-                "appliances."
+                "Could not balance power below budget: no appliance left to shed"
             )
             self._reported_balance_down_failure = True
         return False

@@ -54,14 +54,14 @@
             "entity_id": "Monitored Power Sensor",
             "name": "Custom Name (Optional)",
             "importance": "Importance (1=Low, 10=High)",
-            "last_resort": "Last Resort (Turn off only if absolutely necessary)",
             "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
             "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
             "power_draw_mode": "Power draw",
             "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
           },
           "data_description": {
-            "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
+            "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown.",
+            "importance": "Lower is shed first and restored last; 10 is kept on longest."
           }
         },
         "reconfigure": {
@@ -71,14 +71,14 @@
             "entity_id": "Monitored Power Sensor",
             "name": "Custom Name (Optional)",
             "importance": "Importance (1=Low, 10=High)",
-            "last_resort": "Last Resort (Turn off only if absolutely necessary)",
             "appliance": "Controllable Appliance (Switch, Light, Climate, Water Heater or Media Player)",
             "device_cooldown": "Device Cooldown Override (seconds, leave -1 for default)",
             "power_draw_mode": "Power draw",
             "nominal_power_watt": "Fixed power draw (W, used when the draw is fixed)"
           },
           "data_description": {
-            "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown."
+            "power_draw_mode": "How the balancer sizes this appliance when its sensor cannot say, for example while it is off. Learning uses what the sensor measured while the appliance ran; until it has enough readings the draw stays unknown.",
+            "importance": "Lower is shed first and restored last; 10 is kept on longest."
           }
         }
       },
@@ -101,6 +101,7 @@
         "menu_options": {
           "edit_main_sensor": "Main settings",
           "edit_notifications": "Notifications",
+          "appliances": "Appliances and shed order",
           "finish": "Save"
         }
       },
@@ -131,6 +132,10 @@
           "notify_channel_budget": "The power budget changed",
           "notify_channel_problem": "Something needs attention"
         }
+      },
+      "appliances": {
+        "title": "Appliances and shed order",
+        "description": "The balancer sheds appliances from the top of this table down and restores them from the bottom up, so the most important comes back first. Lower importance is shed first; equal importance keeps the order the appliances were added in. A dash marks an appliance whose balancing is switched off: the balancer never sheds it. To change an importance, edit the appliance from its row on the integration page.\n\n| Shed order | Appliance | Importance |\n|:-:|:--|:-:|\n{rows}"
       },
       "budget_states": {
         "title": "Variable budget",

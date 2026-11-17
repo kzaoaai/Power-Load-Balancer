@@ -125,7 +125,6 @@ async def test_a_restore_that_could_do_nothing_keeps_holding_the_appliance(
         "entity_id": radiator_power,
         "name": "Spare Radiator",
         "importance": 3,
-        "last_resort": False,
     }
     entry = await setup_balancer(power_sensors=[*ladder(), rung])
     await hold(hass, ARM_LEVEL + 60, 75, clock)

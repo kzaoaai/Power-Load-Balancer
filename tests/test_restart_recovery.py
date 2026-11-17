@@ -191,7 +191,6 @@ async def _shed_a_running_radiator(hass, clock, setup_balancer):
         "entity_id": RADIATOR_POWER,
         "name": "Spare Radiator",
         "importance": 3,
-        "last_resort": False,
     }
     entry = await setup_balancer(power_sensors=[*ladder(), rung])
 

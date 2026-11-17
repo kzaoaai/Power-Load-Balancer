@@ -225,7 +225,6 @@ def ladder(*, include_heater: bool = False, upstairs_nameplate: int = 0) -> list
             "entity_id": UPSTAIRS_POWER,
             "name": "Upstairs Tank",
             "importance": 1,
-            "last_resort": False,
             "device_cooldown": 180,
             "nominal_power_watt": upstairs_nameplate,
         },
@@ -234,7 +233,6 @@ def ladder(*, include_heater: bool = False, upstairs_nameplate: int = 0) -> list
             "entity_id": DOWNSTAIRS_POWER,
             "name": "Downstairs Tank",
             "importance": 2,
-            "last_resort": False,
             "device_cooldown": 180,
         },
     ]
@@ -245,7 +243,6 @@ def ladder(*, include_heater: bool = False, upstairs_nameplate: int = 0) -> list
                 "entity_id": HEATER_POWER,
                 "name": "Spare Heater",
                 "importance": 3,
-                "last_resort": False,
             }
         )
     return rungs

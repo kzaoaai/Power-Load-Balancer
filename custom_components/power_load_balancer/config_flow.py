@@ -44,6 +44,7 @@ from homeassistant.helpers.selector import (
 )
 from homeassistant.util import dt as dt_util
 
+from .balancing_engine import importance_of, shed_order
 from .const import (
     BUDGET_MODE_FIXED,
     BUDGET_MODE_SOURCE,
@@ -62,7 +63,6 @@ from .const import (
     CONF_COOLDOWN_SECONDS,
     CONF_DEVICE_COOLDOWN,
     CONF_IMPORTANCE,
-    CONF_LAST_RESORT,
     CONF_MAIN_POWER_SENSOR,
     CONF_NOMINAL_POWER_WATT,
     CONF_NOTIFY_CHANNELS,
@@ -74,6 +74,7 @@ from .const import (
     CONF_SUSTAINED_THRESHOLD_PERCENT,
     DEFAULT_BUDGET_RAISE_DELAY_SECONDS,
     DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_IMPORTANCE,
     DEFAULT_NOMINAL_POWER_WATT,
     DEFAULT_POWER_DRAW_MODE,
     DEFAULT_SUSTAINED_DURATION_SECONDS,
@@ -111,7 +112,46 @@ except ImportError:
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_IMPORTANCE = 5
+
+def _table_cell(value: object) -> str:
+    """Return a value as one Markdown table cell, its pipes escaped."""
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _appliance_rows(entry: ConfigEntry) -> str:
+    """
+    Return the appliance table's rows, in the order the balancer sheds them.
+
+    Balanced appliances come first, numbered in shed order (shed_order, the
+    ladder's own sort, so the table cannot disagree with what the balancer
+    does). Those whose balancing is switched off follow with a dash: the
+    balancer never sheds them. The header lives in the translation, so only
+    the rows are built here.
+    """
+    appliances = [
+        (subentry.title, dict(subentry.data))
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_APPLIANCE
+    ]
+    balanced = [
+        {**data, "_title": title}
+        for title, data in appliances
+        if data.get(CONF_BALANCING_ENABLED, True)
+    ]
+    left_out = [
+        {**data, "_title": title}
+        for title, data in appliances
+        if not data.get(CONF_BALANCING_ENABLED, True)
+    ]
+    rows = [
+        f"| {rank} | {_table_cell(data['_title'])} | {importance_of(data):g} |"
+        for rank, data in enumerate(shed_order(balanced), start=1)
+    ]
+    rows += [
+        f"| - | {_table_cell(data['_title'])} | {importance_of(data):g} |"
+        for data in left_out
+    ]
+    return "\n".join(rows) or "| - | - | - |"
 
 
 def _get_power_sensor_selector() -> EntitySelector:
@@ -355,9 +395,6 @@ def _build_sensor_edit_schema(initial_data: dict[str, Any]) -> vol.Schema:
     schema_dict[vol.Required(CONF_IMPORTANCE, default=importance)] = NumberSelector(
         NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
     )
-
-    last_resort = initial_data.get(CONF_LAST_RESORT, False)
-    schema_dict[vol.Required(CONF_LAST_RESORT, default=last_resort)] = bool
 
     appliance = initial_data.get(CONF_APPLIANCE)
     if appliance is not None:
@@ -822,7 +859,6 @@ def _process_sensor_input(
         CONF_ENTITY_ID: sensor_entity_id_str,
         CONF_NAME: name_to_use,
         CONF_IMPORTANCE: importance,
-        CONF_LAST_RESORT: bool(user_input.get(CONF_LAST_RESORT, False)),
         CONF_APPLIANCE: appliance_entity_id_str,
     }
 
@@ -850,7 +886,6 @@ STEP_ADD_SENSOR_SCHEMA: vol.Schema = vol.Schema(
         vol.Required(CONF_IMPORTANCE, default=DEFAULT_IMPORTANCE): NumberSelector(
             NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
         ),
-        vol.Required(CONF_LAST_RESORT, default=False): bool,
         vol.Required(CONF_APPLIANCE): _get_appliance_selector(),
         vol.Required(
             CONF_POWER_DRAW_MODE, default=DEFAULT_POWER_DRAW_MODE
@@ -982,12 +1017,37 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
         """
         Show the settings menu.
 
-        Appliances are not here: each is a subentry with its own edit and
-        delete on the integration page, and its own balancing switch.
+        Appliances are edited elsewhere: each is a subentry with its own edit
+        and delete on the integration page, and its own balancing switch.
+        The menu only lists them, in the order the balancer sheds them.
         """
         return self.async_show_menu(
             step_id="init",
-            menu_options=["edit_main_sensor", "edit_notifications", "finish"],
+            menu_options=[
+                "edit_main_sensor",
+                "edit_notifications",
+                "appliances",
+                "finish",
+            ],
+        )
+
+    async def async_step_appliances(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """
+        Show every appliance in the order the balancer sheds it.
+
+        Read only: an appliance's importance is edited from its own row on
+        the integration page. Submitting goes back to the menu.
+        """
+        if user_input is not None:
+            return await self.async_step_init()
+        return self.async_show_form(
+            step_id="appliances",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "rows": _appliance_rows(self._config_entry),
+            },
         )
 
     async def async_step_finish(

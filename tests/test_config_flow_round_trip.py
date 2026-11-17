@@ -75,7 +75,6 @@ async def test_nameplate_survives_the_options_flow(hass, world, setup_balancer):
             "appliance": UPSTAIRS,
             "name": "Upstairs Tank",
             "importance": 1,
-            "last_resort": False,
             "device_cooldown": 180,
             "nominal_power_watt": 2050,
         },
@@ -104,7 +103,6 @@ async def test_a_saved_nameplate_is_shown_when_editing_again(
             "entity_id": UPSTAIRS_POWER,
             "appliance": UPSTAIRS,
             "importance": 1,
-            "last_resort": False,
             "device_cooldown": 180,
             "nominal_power_watt": 2050,
         },
@@ -128,7 +126,6 @@ async def test_editing_another_field_keeps_the_nameplate(hass, world, setup_bala
             "entity_id": UPSTAIRS_POWER,
             "appliance": UPSTAIRS,
             "importance": 1,
-            "last_resort": False,
             "device_cooldown": 180,
             "nominal_power_watt": 2050,
         },
@@ -161,7 +158,6 @@ async def test_zero_is_stored_as_unset(hass, world, setup_balancer):
             "entity_id": UPSTAIRS_POWER,
             "appliance": UPSTAIRS,
             "importance": 1,
-            "last_resort": False,
             "device_cooldown": 180,
             "nominal_power_watt": 0,
         },
@@ -174,7 +170,7 @@ async def test_zero_is_stored_as_unset(hass, world, setup_balancer):
 
 @pytest.mark.parametrize(
     "field",
-    ["importance", "last_resort", "device_cooldown", "name", "nominal_power_watt"],
+    ["importance", "device_cooldown", "name", "nominal_power_watt"],
 )
 async def test_every_offered_field_is_stored(hass, world, setup_balancer, field):
     """
@@ -194,7 +190,6 @@ async def test_every_offered_field_is_stored(hass, world, setup_balancer, field)
         "appliance": UPSTAIRS,
         "name": "Renamed Tank",
         "importance": 4,
-        "last_resort": True,
         "device_cooldown": 240,
         "nominal_power_watt": 1800,
     }
@@ -220,7 +215,6 @@ async def test_the_other_appliances_are_untouched(hass, world, setup_balancer):
             "entity_id": UPSTAIRS_POWER,
             "appliance": UPSTAIRS,
             "importance": 1,
-            "last_resort": False,
             "device_cooldown": 180,
             "nominal_power_watt": 2050,
         },

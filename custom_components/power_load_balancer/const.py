@@ -22,7 +22,8 @@ CONF_POWER_SENSORS = "power_sensors"
 CONF_POWER_BUDGET_WATT = "power_budget_watt"
 CONF_APPLIANCE = "appliance"
 CONF_IMPORTANCE = "importance"
-CONF_LAST_RESORT = "last_resort"
+# Importance runs 1 to 10: the lowest is shed first and restored last.
+DEFAULT_IMPORTANCE = 5
 CONF_COOLDOWN_SECONDS = "cooldown_seconds"
 CONF_DEVICE_COOLDOWN = "device_cooldown"
 CONF_NOMINAL_POWER_WATT = "nominal_power_watt"

@@ -169,7 +169,6 @@ NEW_RUNG = {
     "entity_id": "sensor.spare_heater_power",
     "appliance": "switch.spare_heater",
     "importance": 3,
-    "last_resort": False,
 }
 
 
