@@ -61,7 +61,7 @@ Production installs the fork through the Home Assistant Marketplace
 
 ## Current state and open items
 
-- Latest release: **v2.1.4**. Release notes on GitHub carry the per-version
+- Latest release: **v2.1.5**. Release notes on GitHub carry the per-version
   history; what follows is the shape of the code now.
 - **Appliances are config subentries** of type `appliance` (unique id = the
   appliance entity; data = the per-appliance dict plus `balancing_enabled`).
@@ -104,7 +104,8 @@ Production installs the fork through the Home Assistant Marketplace
   `shed_order` in `balancing_engine.py`, the ladder's own sort, so it
   cannot disagree with what is shed (the header lives in the
   translations, only the rows are a placeholder), plus one importance
-  slider per appliance labelled with its title. Moved sliders are staged
+  box per appliance labelled with its title (boxes, not sliders: a slider
+  takes three times the height). Changed values are staged
   in the flow and re-sort the table; Save writes them to their subentries
   together with the entry through `_write_with_one_reload`, which arms
   the balancer's counted reload skip (`skip_next_reload`) per write and

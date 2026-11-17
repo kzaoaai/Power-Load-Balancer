@@ -1104,9 +1104,9 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """
-        Show every appliance in shed order, each with its importance slider.
+        Show every appliance in shed order, each with its importance box.
 
-        A submit that moved a slider shows the table again in the new order,
+        A submit that changed a value shows the table again in the new order,
         so the reordering can be checked before it is kept; a submit with
         nothing moved goes back to the menu. Nothing is written until Save.
         """
@@ -1128,8 +1128,12 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
                 return await self.async_step_init()
             fields = _importance_fields(entry, self._importances)
 
+        # A box per appliance, not a slider: a slider puts its label on a
+        # line of its own and takes three times the height, and the table
+        # above already shows where each value sits. Optional so no field is
+        # starred; a box left empty keeps its value.
         schema = {
-            vol.Required(
+            vol.Optional(
                 label,
                 default=int(
                     self._importances.get(
@@ -1137,7 +1141,7 @@ class PowerLoadBalancerOptionsFlow(_BudgetStatesStep, OptionsFlow):
                     )
                 ),
             ): NumberSelector(
-                NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
+                NumberSelectorConfig(min=1, max=10, step=1, mode=NumberSelectorMode.BOX)
             )
             for label, subentry_id in fields.items()
         }

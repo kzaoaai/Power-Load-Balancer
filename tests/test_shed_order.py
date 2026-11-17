@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.power_load_balancer.balancing_engine import shed_order
@@ -131,7 +132,7 @@ def _importances(entry) -> dict[str, int]:
     return {sub.title: sub.data["importance"] for sub in entry.subentries.values()}
 
 
-async def test_moving_a_slider_reorders_the_table_before_anything_is_saved(
+async def test_changing_a_value_reorders_the_table_before_anything_is_saved(
     hass, world, setup_balancer
 ):
     """The table re-sorts on submit; the stored importances do not move yet."""
@@ -142,10 +143,13 @@ async def test_moving_a_slider_reorders_the_table_before_anything_is_saved(
         "Downstairs Tank",
         "Spare Heater",
     ]
+    for key, selector in result["data_schema"].schema.items():
+        assert isinstance(key, vol.Optional), f"{key} is starred as required"
+        assert selector.config["mode"] == "box", f"{key} is not a compact box"
 
     moved = {"Upstairs Tank": 3, "Downstairs Tank": 2, "Spare Heater": 1}
     result = await hass.config_entries.options.async_configure(result["flow_id"], moved)
-    assert result["step_id"] == "appliances", "a moved slider left the table"
+    assert result["step_id"] == "appliances", "a changed value left the table"
     assert result["description_placeholders"]["rows"].splitlines() == [
         "| 1 | Spare Heater | 1 |",
         "| 2 | Downstairs Tank | 2 |",

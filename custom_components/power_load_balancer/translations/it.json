@@ -135,7 +135,7 @@
       },
       "appliances": {
         "title": "Apparecchi e ordine di distacco",
-        "description": "Il bilanciatore spegne gli apparecchi dall'alto verso il basso di questa tabella e li riaccende dal basso verso l'alto, così il più importante torna per primo. Si spegne prima chi ha l'importanza più bassa; a parità di importanza vale l'ordine in cui gli apparecchi sono stati aggiunti. Un trattino indica un apparecchio con il bilanciamento disattivato: il bilanciatore non lo spegne mai.\n\n| Ordine | Apparecchio | Importanza |\n|:-:|:--|:-:|\n{rows}\n\nSposta un cursore e invia per vedere il nuovo ordine; invia senza spostare nulla per tornare indietro. Nulla viene salvato finché non scegli **Salva**, che applica tutte le modifiche con un solo ricaricamento."
+        "description": "Il bilanciatore spegne gli apparecchi dall'alto verso il basso di questa tabella e li riaccende dal basso verso l'alto, così il più importante torna per primo. Si spegne prima chi ha l'importanza più bassa; a parità di importanza vale l'ordine in cui gli apparecchi sono stati aggiunti. Un trattino indica un apparecchio con il bilanciamento disattivato: il bilanciatore non lo spegne mai.\n\n| Ordine | Apparecchio | Importanza |\n|:-:|:--|:-:|\n{rows}\n\nCambia un'importanza qui sotto e invia per vedere il nuovo ordine; invia senza cambiare nulla per tornare indietro. Nulla viene salvato finché non scegli **Salva**, che applica tutte le modifiche con un solo ricaricamento."
       },
       "budget_states": {
         "title": "Budget variabile",
