@@ -121,5 +121,23 @@ Production installs the fork through the Home Assistant Marketplace
 - Open: `hacs.json` minimum HA (2025.8.0) is an estimate, not verified
   against the first release with config subentries plus
   `async_entity_id_to_device`.
+- Known and not fixed, all latent while the meter reports every few
+  seconds and appliances have devices:
+  - Restores run only on a meter event. Nothing re-checks when restore
+    spacing or a cooldown ends, so a meter that goes flat leaves a held
+    appliance off until the next reading.
+  - An appliance entity created with no device to link to
+    (`appliance_entities.py`, `async_added_to_hass` returns before
+    registering the relink listeners) never links if a device appears
+    later; a reload fixes it.
+  - The budget number (`number.py`) caps at 20000 and always shows W,
+    although the budget is compared against VA as well.
+  - `log_filter.py` at the repo root (a dev script, not shipped) passes
+    `%s` without an argument.
 - Decided against (do not re-propose): a grace delay before a budget
-  drop applies; separate W and VA limits.
+  drop applies; separate W and VA limits; lowering the 50 W learning
+  floor (it separates running from standby; fixed mode covers the rest);
+  deleting upstream's unused `CircuitBreaker`, `log_performance`,
+  `RateLimitError` and `NonRetryableError` (it only widens merges).
+  `hass.async_create_task` keeps its own reference, so untracked tasks
+  are not garbage-collected.
